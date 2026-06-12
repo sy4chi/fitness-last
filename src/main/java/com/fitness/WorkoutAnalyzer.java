@@ -131,9 +131,11 @@ public class WorkoutAnalyzer {
             Object value = result.get(0).getValue();
 
             float[] logits;
-            if (value instanceof float[][] arr) {
+            if (value instanceof float[][]) {
+                float[][] arr = (float[][]) value;
                 logits = arr[0];
-            } else if (value instanceof float[] arr) {
+            } else if (value instanceof float[]) {
+                float[] arr = (float[]) value;
                 logits = arr;
             } else {
                 return "Good";

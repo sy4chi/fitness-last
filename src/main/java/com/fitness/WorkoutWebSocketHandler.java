@@ -30,14 +30,16 @@ public class WorkoutWebSocketHandler extends TextWebSocketHandler {
         Map<String, Object> payload = mapper.readValue(message.getPayload(), new TypeReference<Map<String, Object>>() {});
         Object rawLandmarks = payload.get("landmarks");
 
-        if (!(rawLandmarks instanceof List<?> list)) {
+        if (!(rawLandmarks instanceof List<?>)) {
             session.sendMessage(new TextMessage(mapper.writeValueAsString(Map.of("error", "no_landmarks"))));
             return;
         }
 
+        List<?> list = (List<?>) rawLandmarks;
         List<Landmark> landmarks = new ArrayList<>();
         for (Object item : list) {
-            if (item instanceof Map<?, ?> m) {
+            if (item instanceof Map<?, ?>) {
+                Map<?, ?> m = (Map<?, ?>) item;
                 double x = number(m.get("x"), 0);
                 double y = number(m.get("y"), 0);
                 double z = number(m.get("z"), 0);
