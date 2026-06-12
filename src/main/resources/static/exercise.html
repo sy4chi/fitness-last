@@ -2031,10 +2031,7 @@ window.addEventListener("DOMContentLoaded", async function () {
 
         async function startPreloadingAssets() {
             const preloadFiles = [
-                { key: "pose_landmarker", url: "pose_landmarker_full.task", name: "포즈 추적 모델 (9.4 MB)", size: 9398198 },
-                { key: "squat", url: "models/squat.onnx", name: "스쿼트 AI 모델 (314 KB)", size: 313915 },
-                { key: "pushup", url: "models/pushup.onnx", name: "푸시업 AI 모델 (314 KB)", size: 313915 },
-                { key: "pullup", url: "models/pullup.onnx", name: "풀업 AI 모델 (314 KB)", size: 313915 }
+                { key: "pose_landmarker", url: "pose_landmarker_full.task", name: "포즈 추적 모델 (9.4 MB)", size: 9398198 }
             ];
 
             const totalBytes = preloadFiles.reduce((acc, f) => acc + f.size, 0);
@@ -2126,7 +2123,7 @@ window.addEventListener("DOMContentLoaded", async function () {
 
                 console.log("MediaPipe initialized successfully from preloaded buffer.");
 
-                await loadONNXModel(activeExercise);
+                updateConnectionStatus('connected', 'MediaPipe 준비 완료 · Java AI 서버 연결 대기 중');
 
             } catch (err) {
                 console.error("Initialization failed:", err);
@@ -2384,27 +2381,8 @@ window.addEventListener("DOMContentLoaded", async function () {
 
         // ONNX 추론을 렌더 루프와 분리하여 비동기로 실행
         async function runOnnxInference() {
-            if (isOnnxRunning || !onnxSession) return;
-            isOnnxRunning = true;
-            try {
-                const flattened = new Float32Array(30 * 132);
-                const bufferSnapshot = featureBuffer.slice();
-                for (let i = 0; i < 30; i++) {
-                    flattened.set(bufferSnapshot[i], i * 132);
-                }
-
-                const tensor = new ort.Tensor('float32', flattened, [1, 30, 132]);
-                const feeds = { [onnxSession.inputNames[0]]: tensor };
-                const outputs = await onnxSession.run(feeds);
-                const outputData = outputs[onnxSession.outputNames[0]].data;
-
-                const predictedClass = outputData[0] >= outputData[1] ? 0 : 1;
-                cachedPoseLabel = predictedClass === 0 ? "Good" : "Bad";
-            } catch (err) {
-                console.warn("ONNX inference fail:", extractWasmErrorMessage(err));
-            } finally {
-                isOnnxRunning = false;
-            }
+            // Java 서버 모드에서는 브라우저 ONNX 추론을 사용하지 않습니다.
+            return;
         }
 
         // Gorgeous custom skeleton drawer matching the Local Test model's exact joints & visibility thresholds

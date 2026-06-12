@@ -69,18 +69,33 @@ public class WorkoutAnalyzer {
     private OrtSession getSession(String exercise) throws Exception {
         if (sessions.containsKey(exercise)) return sessions.get(exercise);
 
-        String resourcePath = "static/models/" + exercise + ".onnx";
-        ClassPathResource res = new ClassPathResource(resourcePath);
+        // ONNX가 외부 데이터 파일(.onnx.data)을 참조할 수 있으므로
+        // .onnx와 .onnx.data를 같은 임시 폴더에 함께 복사한 뒤 로드합니다.
+        File tempDir = Files.createTempDirectory("fitness_onnx_" + exercise + "_").toFile();
+        tempDir.deleteOnExit();
 
-        File temp = File.createTempFile(exercise + "_", ".onnx");
-        temp.deleteOnExit();
-        try (InputStream in = res.getInputStream()) {
-            Files.copy(in, temp.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        String onnxName = exercise + ".onnx";
+        String dataName = exercise + ".onnx.data";
+
+        ClassPathResource onnxRes = new ClassPathResource("static/models/" + onnxName);
+        File onnxFile = new File(tempDir, onnxName);
+        try (InputStream in = onnxRes.getInputStream()) {
+            Files.copy(in, onnxFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        onnxFile.deleteOnExit();
+
+        ClassPathResource dataRes = new ClassPathResource("static/models/" + dataName);
+        if (dataRes.exists()) {
+            File dataFile = new File(tempDir, dataName);
+            try (InputStream in = dataRes.getInputStream()) {
+                Files.copy(in, dataFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            dataFile.deleteOnExit();
         }
 
         OrtSession.SessionOptions opts = new OrtSession.SessionOptions();
         opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT);
-        OrtSession session = env.createSession(temp.getAbsolutePath(), opts);
+        OrtSession session = env.createSession(onnxFile.getAbsolutePath(), opts);
         sessions.put(exercise, session);
         return session;
     }
