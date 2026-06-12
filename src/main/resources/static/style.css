@@ -1,0 +1,146 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;900&display=swap');
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  width: 100%;
+  min-height: 100%;
+  font-family: "Noto Sans KR", system-ui, sans-serif;
+  background: #000;
+  color: #fff;
+}
+a { color: inherit; text-decoration: none; }
+.browser-shell { min-height: 100vh; }
+.hero-card {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #092b31;
+}
+.hero-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: url("assets/hero-fitness.jpg") center / cover no-repeat;
+  transform: scale(1.04);
+  filter: blur(5px);
+  opacity: .9;
+}
+.hero-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(0,20,24,.38), rgba(0,24,28,.34), rgba(0,24,28,.62)),
+    rgba(0,0,0,.18);
+  backdrop-filter: blur(2px);
+}
+.topbar {
+  position: relative;
+  z-index: 2;
+  height: 112px;
+  padding: 34px 8vw 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255,255,255,.24);
+}
+.logo { display: flex; flex-direction: column; gap: 8px; line-height: .86; font-weight: 900; letter-spacing: -.06em; }
+.logo span { font-size: 42px; }
+.logo small { font-size: 13px; letter-spacing: .34em; }
+.header-actions { display: flex; align-items: center; gap: 12px; }
+.user-badge { color: rgba(255,255,255,.85); font-weight: 800; }
+.auth-link, .secondary-btn {
+  border: 2px solid rgba(255,255,255,.9);
+  padding: 16px 34px;
+  font-size: 16px;
+  font-weight: 900;
+  background: rgba(255,255,255,.03);
+}
+.hero-copy {
+  position: relative;
+  z-index: 2;
+  min-height: calc(100vh - 112px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 0 24px 80px;
+}
+.hero-copy-inner { max-width: 900px; }
+.hero-copy h1 {
+  font-family: "Black Han Sans", "Noto Sans KR", sans-serif;
+  font-weight: 400;
+  font-size: clamp(48px, 6vw, 86px);
+  line-height: 1.08;
+  letter-spacing: -.04em;
+  margin: 0 0 30px;
+}
+.hero-copy p {
+  margin: 0 0 46px;
+  color: rgba(255,255,255,.9);
+  font-size: clamp(16px, 1.5vw, 22px);
+  line-height: 1.65;
+  font-weight: 700;
+}
+.cta-row { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.primary-btn {
+  height: 68px;
+  min-width: 190px;
+  padding: 0 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #111;
+  border: 1px solid #fff;
+  font-weight: 900;
+  font-size: 16px;
+}
+.secondary-btn {
+  height: 68px;
+  min-width: 150px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ranking-preview {
+  padding: 44px 8vw;
+  background:
+    linear-gradient(120deg, rgba(0,22,25,.92), rgba(0,35,40,.86)),
+    url("assets/hero-fitness-blur.jpg") center / cover fixed;
+}
+.ranking-preview h2 { margin: 0 0 18px; font-size: 34px; }
+.rank-list { display: grid; gap: 10px; max-width: 720px; }
+.rank-row {
+  display: grid;
+  grid-template-columns: 50px 1fr 100px;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.16);
+}
+@media (max-width: 800px) {
+  .topbar { padding: 22px; height: 96px; }
+  .logo span { font-size: 30px; }
+  .auth-link { padding: 12px 18px; }
+  .user-badge { display: none; }
+  .hero-copy h1 { font-size: 46px; }
+}
+
+
+/* mobile Korean title wrap fix */
+.hero-copy h1 {
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+@media (max-width: 800px) {
+  .hero-copy h1 {
+    font-size: 42px;
+    line-height: 1.16;
+    word-break: keep-all;
+    overflow-wrap: normal;
+  }
+}

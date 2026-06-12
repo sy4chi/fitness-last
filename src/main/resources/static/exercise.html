@@ -1,0 +1,2822 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- COOP/COEP Service Worker for GitHub Pages high-speed WASM multithreading -->
+    <title>FITNESS | AI 운동 자세 코치</title>
+    <!-- Google Fonts: Outfit & Noto Sans KR -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=Outfit:wght@300;400;600;800&display=swap"
+        rel="stylesheet">
+
+    <!-- ONNX Runtime Web Local Serving -->
+    <script src="static/ort.min.js"></script>
+
+    <!-- Global diagnostics capture for early scripting & network errors -->
+    <script>
+        window.addEventListener('error', function (e) {
+            // Check if it is a network resource load failure
+            let errMsg = e.message;
+            let errSrc = e.filename ? e.filename + ':' + e.lineno : '';
+            if (e.target && (e.target.src || e.target.href)) {
+                errMsg = `네트워크 리소스 로딩 실패: ${e.target.src || e.target.href}`;
+                errSrc = e.target.tagName;
+            }
+            showDiagnosticError(errMsg || '스크립트 실행 오류가 감지되었습니다.', errSrc);
+        }, true); // Use capture phase to catch network resource loading failures (CORS, 404)
+
+        window.addEventListener('unhandledrejection', function (e) {
+            showDiagnosticError('비동기 처리 에러: ' + (e.reason ? e.reason.message || e.reason : '알 수 없는 거절'));
+        });
+
+        function showDiagnosticError(message, source) {
+            setTimeout(() => {
+                const errorLog = document.getElementById('loader-error-log');
+                const content = document.getElementById('error-log-content');
+                const statusText = document.getElementById("loader-status-text");
+                const progressBar = document.getElementById("loader-progress-bar");
+                const percentText = document.getElementById("loader-percentage-text");
+
+                if (errorLog && content) {
+                    errorLog.style.display = 'block';
+                    const srcInfo = source ? `\n[위치]: ${source}` : '';
+                    content.innerText = `[진단 데이터]: ${message}${srcInfo}`;
+
+                    if (statusText) statusText.innerText = "오류 발생! 시스템 진단 결과를 확인하세요.";
+                    if (percentText) percentText.innerText = "ERR";
+                    if (progressBar) {
+                        progressBar.style.width = "100%";
+                        progressBar.style.background = "#f43f5e";
+                        progressBar.style.boxShadow = "0 0 15px rgba(244, 63, 94, 0.8)";
+                    }
+                }
+            }, 50);
+        }
+    </script>
+
+    <style>
+        :root {
+            --bg-base: #f5f5f7;
+            /* Apple Signature Light Gray */
+            --bg-surface: #ffffff;
+            /* Crisp Solid White */
+            --border-color: rgba(0, 0, 0, 0.08);
+            /* Minimal Neutral Border */
+            --primary: #0071e3;
+            /* Apple Signature Blue */
+            --primary-glow: rgba(0, 113, 227, 0.15);
+            --accent-cyan: #0071e3;
+            --accent-emerald: #34c759;
+            /* iOS green */
+            --accent-emerald-glow: rgba(52, 199, 89, 0.15);
+            --accent-rose: #ff3b30;
+            /* iOS red */
+            --accent-rose-glow: rgba(255, 59, 48, 0.15);
+            --text-main: #1d1d1f;
+            /* Apple Charcoal */
+            --text-muted: #86868b;
+            /* Apple Gray */
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Noto Sans KR', 'Outfit', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        header {
+            position: relative;
+            z-index: 10;
+            padding: 18px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-badge {
+            background: #ffffff;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 1.15rem;
+            color: var(--primary);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.35rem;
+            font-weight: 700;
+            color: var(--text-main);
+            letter-spacing: -0.5px;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #ffffff;
+            padding: 8px 18px;
+            border-radius: 980px;
+            /* Apple pill-shaped status */
+            border: 1px solid var(--border-color);
+            font-size: 0.82rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+            transition: all 0.2s ease;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--accent-rose);
+        }
+
+        .status-dot.connected {
+            background-color: var(--accent-emerald);
+            animation: pulse 1.5s infinite alternate;
+        }
+
+        .status-dot.loading {
+            background-color: #ff9500;
+            /* iOS orange */
+            animation: pulse 0.8s infinite alternate;
+        }
+
+        main {
+            position: relative;
+            z-index: 1;
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 32px;
+            padding: 32px 40px;
+            max-width: 1440px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        @media (max-width: 1024px) {
+            main {
+                grid-template-columns: 1fr;
+                gap: 24px;
+                padding: 20px;
+            }
+        }
+
+        /* Left Side: Camera Container */
+        .workspace-panel {
+            background: var(--bg-surface);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            border-radius: 20px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.03);
+            position: relative;
+        }
+
+        .camera-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #fafafa;
+            border-radius: 14px;
+            overflow: hidden;
+            border: 1px solid rgba(0, 0, 0, 0.06);
+        }
+
+        video#webcam {
+            position: absolute;
+            left: -9999px;
+            top: -9999px;
+            width: 640px;
+            height: 360px;
+            opacity: 1;
+            pointer-events: none;
+        }
+
+        canvas#canvas-stream {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* Overlay indicators */
+        .camera-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            bottom: 20px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .overlay-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .overlay-badge {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            padding: 7px 14px;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-main);
+            letter-spacing: 0.3px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+
+        .overlay-state-badge {
+            padding: 8px 20px;
+            border-radius: 10px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            letter-spacing: 0.5px;
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .state-ready {
+            background: rgba(30, 30, 30, 0.7);
+        }
+
+        .state-down {
+            background: rgba(0, 113, 227, 0.85);
+            /* Apple Blue */
+            box-shadow: 0 4px 15px rgba(0, 113, 227, 0.3);
+        }
+
+        .overlay-bottom {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .camera-guide-box {
+            background: rgba(255, 149, 0, 0.08);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 149, 0, 0.2);
+            color: #cc7a00;
+            padding: 10px 18px;
+            border-radius: 12px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            max-width: 420px;
+            line-height: 1.45;
+            box-shadow: 0 4px 12px rgba(255, 149, 0, 0.05);
+        }
+
+        .fps-badge {
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--primary);
+            border: 1px solid rgba(0, 113, 227, 0.15);
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+        }
+
+        /* Right Side: Controls & Analytics */
+        .controls-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .glass-card {
+            background: var(--bg-surface);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.03);
+            transition: all 0.25s ease;
+        }
+
+        .glass-card:hover {
+            border-color: rgba(0, 0, 0, 0.1);
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.05);
+        }
+
+        .panel-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Exercise selection grid */
+        .exercise-selectors {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+
+        .selector-btn {
+            background: #f5f5f7;
+            border: 1px solid rgba(0, 0, 0, 0.02);
+            border-radius: 14px;
+            padding: 16px 10px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .selector-btn:hover {
+            background: #e8e8ed;
+            color: var(--text-main);
+        }
+
+        .selector-btn.active {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: white;
+            box-shadow: 0 4px 12px rgba(0, 113, 227, 0.25);
+        }
+
+        .selector-btn.active .btn-icon {
+            color: white;
+        }
+
+        .btn-icon {
+            font-size: 1.5rem;
+            transition: all 0.2s ease;
+        }
+
+        /* Analytics stats */
+        .analytics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.1fr;
+            gap: 20px;
+            align-items: center;
+        }
+
+        /* Round Gauge container */
+        .gauge-container {
+            position: relative;
+            width: 142px;
+            height: 142px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .gauge-svg {
+            transform: rotate(-90deg);
+            width: 100%;
+            height: 100%;
+        }
+
+        .gauge-bg {
+            fill: none;
+            stroke: #f5f5f7;
+            stroke-width: 9;
+        }
+
+        .gauge-progress {
+            fill: none;
+            stroke: url(#scoreGrad);
+            stroke-width: 9;
+            stroke-linecap: round;
+            stroke-dasharray: 377;
+            stroke-dashoffset: 377;
+            transition: stroke-dashoffset 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .gauge-center {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .gauge-val {
+            font-family: 'Outfit', sans-serif;
+            font-size: 2.15rem;
+            font-weight: 700;
+            line-height: 1;
+            color: var(--text-main);
+        }
+
+        .gauge-lbl {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+
+        /* Bar metrics */
+        .bar-metrics {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .metric-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .metric-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .metric-label {
+            color: var(--text-muted);
+        }
+
+        .metric-value {
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+        }
+
+        .metric-bar-bg {
+            background: #f5f5f7;
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .metric-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+
+        .fill-accuracy {
+            background: var(--primary);
+        }
+
+        .fill-stability {
+            background: var(--accent-emerald);
+        }
+
+        /* AI Label and feedback card */
+        .feedback-section {
+            min-height: 110px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .ai-label-wrapper {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .ai-badge {
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 0.78rem;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .badge-good {
+            background: rgba(52, 199, 89, 0.1);
+            border: 1px solid rgba(52, 199, 89, 0.2);
+            color: var(--accent-emerald);
+        }
+
+        .badge-bad {
+            background: rgba(255, 59, 48, 0.1);
+            border: 1px solid rgba(255, 59, 48, 0.2);
+            color: var(--accent-rose);
+        }
+
+        .feedback-bubble {
+            background: #f5f5f7;
+            border-left: 4px solid var(--primary);
+            border-radius: 0 10px 10px 0;
+            padding: 12px 16px;
+            font-size: 1.05rem;
+            font-weight: 500;
+            color: var(--text-main);
+            min-height: 52px;
+            display: flex;
+            align-items: center;
+            transition: all 0.2s ease;
+        }
+
+        .feedback-bubble.highlight {
+            background: rgba(0, 113, 227, 0.05);
+            border-left-color: var(--primary);
+            animation: highlight-pulse 0.4s ease;
+        }
+
+        /* Session Summary grid */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            text-align: center;
+        }
+
+        .summary-card {
+            background: #f5f5f7;
+            border-radius: 12px;
+            padding: 14px 8px;
+        }
+
+        .summary-val {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-main);
+            line-height: 1.2;
+        }
+
+        .summary-lbl {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .actions-row {
+            display: flex;
+            gap: 16px;
+            margin-top: 10px;
+        }
+
+        .btn {
+            flex: 1;
+            background: #f5f5f7;
+            border: 1px solid rgba(0, 0, 0, 0.02);
+            border-radius: 12px;
+            padding: 14px;
+            color: var(--text-main);
+            font-weight: 600;
+            font-size: 0.92rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: #e8e8ed;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            border: none;
+            color: white;
+            box-shadow: 0 4px 12px var(--primary-glow);
+        }
+
+        .btn-primary:hover {
+            background: #0062c3;
+            /* Darker Apple Blue */
+            box-shadow: 0 6px 16px rgba(0, 113, 227, 0.25);
+            transform: translateY(-1px);
+        }
+
+        .sound-controller {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #d2d2d7;
+            transition: .2s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 24px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .2s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 50%;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+        }
+
+        input:checked+.toggle-slider {
+            background-color: var(--accent-emerald);
+        }
+
+        input:checked+.toggle-slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Animations */
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+                opacity: 0.8;
+            }
+
+            100% {
+                transform: scale(1.1);
+                opacity: 1;
+            }
+        }
+
+        @keyframes highlight-pulse {
+            0% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.02);
+            }
+
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        footer {
+            padding: 24px;
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border-color);
+            margin-top: auto;
+        }
+
+        /* Clean White Loading Screen Overlay Styles */
+        #loader-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #ffffff;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1), transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        #loader-overlay.fade-out {
+            opacity: 0;
+            transform: scale(1.03);
+            pointer-events: none;
+        }
+
+        .loader-content {
+            width: 90%;
+            max-width: 400px;
+            text-align: center;
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 40px 24px;
+        }
+
+        .loader-logo {
+            background: var(--primary);
+            width: 54px;
+            height: 54px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 1.6rem;
+            color: white;
+            margin: 0 auto 24px;
+            box-shadow: 0 4px 12px var(--primary-glow);
+        }
+
+        .loader-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.45rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--text-main);
+        }
+
+        .loader-subtitle {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin-bottom: 32px;
+        }
+
+        .progress-container {
+            width: 100%;
+            height: 6px;
+            background: #e5e5e7;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--primary);
+            border-radius: 3px;
+            transition: width 0.1s ease;
+        }
+
+        .progress-text-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.82rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+        }
+
+        #loader-status-text {
+            color: var(--text-muted);
+        }
+
+        #loader-percentage-text {
+            font-family: 'Outfit', sans-serif;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .loader-cache-tip {
+            font-size: 0.72rem;
+            color: #cc7a00;
+            line-height: 1.4;
+        }
+
+        /* FITNESS unified UI override: visual layer only, camera/canvas/model logic untouched */
+        :root {
+            --primary: #74d680;
+            --primary-glow: rgba(116, 214, 128, 0.22);
+            --accent-cyan: #74d680;
+            --accent-emerald: #74d680;
+            --bg-base: #071f23;
+            --bg-surface: rgba(255, 255, 255, 0.88);
+        }
+        body {
+            background: #071f23;
+        }
+        header {
+            background: rgba(7, 31, 35, 0.78);
+            color: #fff;
+            border-bottom: 1px solid rgba(255,255,255,0.16);
+        }
+        .logo-section h1 {
+            font-size: clamp(1.8rem, 4vw, 2.6rem);
+            letter-spacing: -0.04em;
+            color: #fff;
+            font-weight: 900;
+        }
+        .status-pill,
+        .glass-card,
+        .camera-wrapper,
+        .sound-controller {
+            border: 1px solid rgba(255,255,255,0.18);
+            box-shadow: 0 18px 40px rgba(0,0,0,0.18);
+        }
+        .glass-card,
+        .sound-controller {
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: blur(14px);
+        }
+        .panel-title {
+            color: #083239;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+        }
+        .selector-btn.active,
+        .btn-primary,
+        #start-btn {
+            background: #74d680 !important;
+            color: #062024 !important;
+            box-shadow: 0 12px 26px rgba(116, 214, 128, 0.24) !important;
+        }
+        .selector-btn.active {
+            border-color: rgba(116, 214, 128, 0.9) !important;
+        }
+        .metric-bar-fill,
+        #gauge-circle {
+            stroke: #74d680;
+        }
+        .gauge-val,
+        .summary-val,
+        .metric-value {
+            color: #0f3f35;
+        }
+        footer {
+            color: rgba(255,255,255,0.74);
+        }
+        @media (max-width: 768px) {
+            header {
+                padding: 16px 18px;
+                gap: 12px;
+            }
+            .logo-section h1 {
+                font-size: 2rem;
+                word-break: keep-all;
+            }
+            main {
+                gap: 16px;
+            }
+            .glass-card {
+                border-radius: 20px;
+            }
+        }
+
+    </style>
+
+<script>
+(function syncFitnessLoginKeys() {
+  const keys = ["fitnessUserId", "fitnessUser", "user", "loggedInUserId", "currentUser", "username"];
+  let value = "";
+  for (const key of keys) {
+    const v = localStorage.getItem(key);
+    if (v) { value = v; break; }
+  }
+  if (value) {
+    localStorage.setItem("fitnessUserId", value);
+    localStorage.setItem("fitnessUser", value);
+    localStorage.setItem("user", value);
+    localStorage.setItem("loggedInUserId", value);
+    localStorage.setItem("currentUser", value);
+    localStorage.setItem("username", value);
+  }
+})();
+</script>
+
+</head>
+
+<body>
+
+<!-- Camera Permission Fix Overlay -->
+<div id="camera-permission-fix" style="position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:100000; display:flex; gap:10px; align-items:center; padding:12px 14px; border-radius:14px; background:rgba(0,0,0,.72); color:#fff; border:1px solid rgba(255,255,255,.25); backdrop-filter:blur(12px); box-shadow:0 18px 40px rgba(0,0,0,.35); font:700 14px system-ui;">
+  <span>카메라 사용 준비</span>
+  <button type="button" onclick="requestCameraPermissionAndStart()" style="height:38px; padding:0 14px; border:0; border-radius:10px; background:#fff; color:#111; font-weight:900; cursor:pointer;">운동 시작</button>
+</div>
+
+<script>
+async function requestCameraPermissionAndStart() {
+  const box = document.getElementById("camera-permission-fix");
+  try {
+    if (typeof window.unlockTTSForIOS === "function") window.unlockTTSForIOS();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert("이 브라우저에서 카메라 API를 사용할 수 없습니다. Chrome 최신 버전으로 접속해주세요.");
+      return;
+    }
+    if (box) box.style.display = "none";
+    if (typeof window.handleStartButton === "function") {
+      await window.handleStartButton();
+    }
+  } catch (err) {
+    console.error("[Camera Permission Error]", err);
+    alert("카메라 권한 요청 실패: " + (err && err.message ? err.message : err));
+  }
+}
+
+window.addEventListener("DOMContentLoaded", async function () {
+  const box = document.getElementById("camera-permission-fix");
+  if (!box) return;
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      const result = await navigator.permissions.query({ name: "camera" });
+      if (result.state === "granted") box.style.display = "none";
+    }
+  } catch (_) {
+    // Safari 일부 버전은 camera permission query를 지원하지 않습니다.
+  }
+});
+</script>
+
+
+    <div id="fitness-auth-bar" style="position:fixed; top:12px; right:12px; z-index:99999; display:flex; gap:8px; align-items:center; background:rgba(0,0,0,.5); color:#fff; border:1px solid rgba(255,255,255,.2); border-radius:12px; padding:8px 10px; backdrop-filter:blur(10px); font:700 13px system-ui;">
+        <span id="fitness-auth-name">비로그인</span>
+        <a id="fitness-login-open" href="login.html" style="background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.3); border-radius:8px; padding:6px 9px; cursor:pointer;">로그인</a>
+        <button id="fitness-logout-btn" type="button" onclick="logoutFitness()" style="display:none; background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.3); border-radius:8px; padding:6px 9px; cursor:pointer;">로그아웃</button>
+    </div>
+
+
+    <!-- Cyberpunk Loader Overlay -->
+    <div id="loader-overlay">
+        <div class="loader-content">
+            <h2 class="loader-title">FITNESS AI TRAINER</h2>
+            <p class="loader-subtitle">운동 자세 분석에 필요한 AI 모듈을 준비하고 있습니다.</p>
+
+            <div class="progress-container">
+                <div id="loader-progress-bar" class="progress-bar-fill"></div>
+            </div>
+
+            <div class="progress-text-row">
+                <span id="loader-status-text">카메라 시작 버튼을 눌러 권한을 허용해주세요.</span>
+                <span id="loader-percentage-text">0%</span>
+            </div>
+
+            <p class="loader-cache-tip">⚠️ 첫 접속 시에만 다운로드하며, 이후에는 브라우저 캐시에서 즉시 로드됩니다.</p>
+
+            <!-- TTS 활성화용 시작 버튼 (로딩 완료 후 표시) -->
+            <button id="start-btn" onclick="handleStartButton()"
+                style="display:none; margin-top:24px; width:100%; padding:14px; background:var(--primary); color:white; border:none; border-radius:12px; font-size:1rem; font-weight:600; cursor:pointer; box-shadow:0 4px 12px rgba(0,113,227,0.3); transition: all 0.2s ease;">
+                ▶ 운동 시작
+            </button>
+
+            <!-- Diagnostic error console -->
+            <div id="loader-error-log"
+                style="display: none; margin-top: 20px; padding: 14px; background: rgba(244, 63, 94, 0.08); border: 1px dashed var(--accent-rose); border-radius: 12px; font-family: monospace; font-size: 0.78rem; color: #fda4af; text-align: left; max-height: 120px; overflow-y: auto; box-shadow: 0 0 10px rgba(244, 63, 94, 0.15);">
+                <div
+                    style="font-weight: 700; color: #f43f5e; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                    <span style="animation: pulse 0.5s infinite alternate;">🔴</span> SYSTEM DIAGNOSTIC ERROR:
+                </div>
+                <div id="error-log-content" style="white-space: pre-wrap; line-height: 1.4;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Overlay -->
+    <div id="login-overlay" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:10000; display:none; align-items:center; justify-content:center; backdrop-filter:blur(10px);">
+        <div style="background:white; padding:40px; border-radius:20px; width:90%; max-width:400px; text-align:center;">
+            <h2 style="margin-bottom:10px;">FITNESS 로그인</h2>
+            <p style="color:#666; margin-bottom:30px;">기존 기록을 불러오거나 새로 등록하세요.</p>
+            <input type="text" id="user-id" placeholder="아이디" style="width:100%; padding:14px; margin-bottom:12px; border:1px solid #ddd; border-radius:12px; font-size:1rem;">
+            <input type="password" id="user-pw" placeholder="비밀번호" style="width:100%; padding:14px; margin-bottom:24px; border:1px solid #ddd; border-radius:12px; font-size:1rem;">
+            <div style="display:flex; gap:10px;">
+                <button onclick="handleAuth('login')" style="flex:1; padding:16px; background:#0071e3; color:white; border:none; border-radius:12px; font-size:1.1rem; font-weight:600; cursor:pointer;">로그인</button>
+                <button onclick="handleAuth('register')" style="flex:1; padding:16px; background:#34c759; color:white; border:none; border-radius:12px; font-size:1.1rem; font-weight:600; cursor:pointer;">회원가입</button>
+            </div>
+        </div>
+    </div>
+
+    <header>
+
+        <div class="logo-section">
+            <div>
+                <h1>FITNESS</h1>
+            </div>
+        </div>
+
+        <div class="status-pill">
+            <div id="conn-dot" class="status-dot"></div>
+            <span id="conn-text">로딩 중...</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Left Column: Camera and Landmark overlay -->
+        <section class="workspace-panel">
+            <div class="camera-wrapper">
+                <video id="webcam" autoplay playsinline muted></video>
+                <canvas id="canvas-stream"></canvas>
+
+                <div class="camera-overlay">
+                    <div class="overlay-top">
+                        <span id="guide-badge" class="overlay-badge fps-badge">FPS --</span>
+                        <div id="state-badge" class="overlay-state-badge state-ready">READY</div>
+                    </div>
+
+                    <div class="overlay-bottom">
+                        <div id="camera-guide" class="camera-guide-box">
+                            카메라 가이드: 준비 중...
+                        </div>
+                        <span id="ai-prediction-dot" class="overlay-badge"
+                            style="background: rgba(16, 185, 129, 0.8);">AI: --</span>
+                        <div id="live-debug-console"
+                            style="margin-top: 10px; font-size: 0.75rem; font-family: monospace; padding: 8px 12px; border-radius: 8px; background: rgba(15, 23, 42, 0.85); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); display: none; max-width: 320px; white-space: normal; word-break: break-all; pointer-events: auto; backdrop-filter: blur(10px); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); text-align: left;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sound-controller">
+                <span>🔊 실시간 음성 코칭 및 효과음 활성화</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="voice-enable" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </section>
+
+        <!-- Right Column: Control Center & Real-Time Stats -->
+        <section class="controls-panel">
+
+            <!-- Card 1: Exercise Selector -->
+            <div class="glass-card">
+                <div class="panel-title">운동 종목 선택</div>
+                <div class="exercise-selectors">
+                    <button class="selector-btn active" id="btn-squat" onclick="changeExercise('squat')">
+                        <span class="btn-icon">🧘‍♂️</span>
+                        <span>스쿼트</span>
+                    </button>
+                    <button class="selector-btn" id="btn-pushup" onclick="changeExercise('pushup')">
+                        <span class="btn-icon">🤸‍♂️</span>
+                        <span>푸시업</span>
+                    </button>
+                    <button class="selector-btn" id="btn-pullup" onclick="changeExercise('pullup')">
+                        <span class="btn-icon">🏋️‍♂️</span>
+                        <span>풀업</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Card 2: Live Analytics -->
+            <div class="glass-card">
+                <div class="panel-title">
+                    <span>실시간 운동 평가지표</span>
+                    <span id="measuring-indicator"
+                        style="color: var(--accent-cyan); font-size: 0.75rem; text-transform: uppercase; font-weight: 700; display:none;">●
+                        측정 중</span>
+                </div>
+
+                <div class="analytics-grid">
+                    <!-- Circle Total Score -->
+                    <div class="gauge-container">
+                        <svg class="gauge-svg">
+                            <defs>
+                                <linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#0071e3" />
+                                    <stop offset="100%" stop-color="#34c759" />
+                                </linearGradient>
+                            </defs>
+                            <circle class="gauge-bg" cx="70" cy="70" r="60"></circle>
+                            <circle id="gauge-circle" class="gauge-progress" cx="70" cy="70" r="60"></circle>
+                        </svg>
+                        <div class="gauge-center">
+                            <span id="score-value" class="gauge-val">0.0</span>
+                            <span class="gauge-lbl">점수</span>
+                        </div>
+                    </div>
+
+                    <!-- Horizontal Bar meters -->
+                    <div class="bar-metrics">
+                        <div class="metric-group">
+                            <div class="metric-info">
+                                <span class="metric-label">자세 정확도</span>
+                                <span id="accuracy-val" class="metric-value">-- %</span>
+                            </div>
+                            <div class="metric-bar-bg">
+                                <div id="accuracy-bar" class="metric-bar-fill fill-accuracy"></div>
+                            </div>
+                        </div>
+
+                        <div class="metric-group">
+                            <div class="metric-info">
+                                <span class="metric-label">좌우 안정성</span>
+                                <span id="stability-val" class="metric-value">100 %</span>
+                            </div>
+                            <div class="metric-bar-bg">
+                                <div id="stability-bar" class="metric-bar-fill fill-stability"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 3: AI Real-Time Feedback -->
+            <div class="glass-card feedback-section">
+                <div class="ai-label-wrapper">
+                    <span class="panel-title" style="margin-bottom:0;">실시간 코칭 피드백</span>
+                    <span id="ai-badge" class="ai-badge badge-good">GOOD</span>
+                </div>
+                <div id="feedback-bubble" class="feedback-bubble">
+                    로딩 중...
+                </div>
+            </div>
+
+            <!-- Card 4: Session Metrics -->
+            <div class="glass-card">
+                <div class="panel-title">세션 종합 기록</div>
+                <div class="summary-grid">
+                    <div class="summary-card">
+                        <div id="sum-reps" class="summary-val">0</div>
+                        <div class="summary-lbl">총 횟수</div>
+                    </div>
+                    <div class="summary-card">
+                        <div id="sum-avg" class="summary-val">0.0</div>
+                        <div class="summary-lbl">평균 점수</div>
+                    </div>
+                    <div class="summary-card">
+                        <div id="sum-peak" class="summary-val">0.0</div>
+                        <div class="summary-lbl">최고 점수</div>
+                    </div>
+                </div>
+
+                <div class="actions-row">
+                    <button class="btn btn-primary" onclick="resetStats()">🔄 세션 기록 초기화</button>
+                    <button class="btn" style="background: var(--accent-emerald); color: white;" onclick="exportSessionData()">💾 결과 저장</button>
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <footer>
+        FITNESS © 2026. Java ONNX 서버 기반 실시간 운동 자세 분석
+    </footer>
+
+    <!-- MediaPipe Vision Task Library (ES module dynamic imports) -->
+    <script type="module">
+        // Real-time on-screen debug console hooks
+        const debugConsole = document.getElementById('live-debug-console');
+        const showDebug = (msg, isErr = true) => {
+            if (!debugConsole) return;
+            debugConsole.style.display = 'block';
+            debugConsole.style.color = isErr ? '#ef4444' : '#fbbf24';
+            debugConsole.style.borderColor = isErr ? 'rgba(239, 68, 68, 0.3)' : 'rgba(251, 191, 36, 0.3)';
+            debugConsole.innerText = `⚠️ [${isErr ? "오류" : "경고"}] ${msg}`;
+        };
+
+        const _err = console.error;
+        console.error = function (...args) {
+            const str = args.join(' ');
+            if (str.includes("inference_feedback_manager") || str.includes("signature") || str.includes("feedback_manager")) return;
+
+            _err.apply(console, args);
+            if (str.includes("MediaPipe") || str.includes("ONNX") || str.includes("WASM") || str.includes("Init") || str.includes("failed")) {
+                showDebug(str, true);
+            }
+        };
+
+        const _warn = console.warn;
+        console.warn = function (...args) {
+            const str = args.join(' ');
+            // Filter out internal MediaPipe inference_feedback_manager warnings to keep UI clean
+            if (str.includes("inference_feedback_manager") || str.includes("signature") || str.includes("feedback_manager")) return;
+
+            _warn.apply(console, args);
+            if (str.includes("MediaPipe") || str.includes("ONNX") || str.includes("timestamp") || str.includes("inference")) {
+                showDebug(str, false);
+            }
+        };
+
+        import { PoseLandmarker, FilesetResolver } from "./static/vision_bundle.mjs";
+
+        // Global variables & engine states
+        let poseLandmarker = null;
+        let activeExercise = 'squat';
+        let isCameraActive = false;
+        let lastSpeakTime = 0;
+        const speechCooldown = 4000;
+
+        let featureBuffer = []; // stores normalized 132-dimension coordinates
+        let landmarkHistory = []; // stores shoulder x position standard deviation
+        let onnxSession = null;
+        let cachedPoseLabel = "Good";
+        let onnxFrameCounter = 0;
+        let isOnnxRunning = false; // ONNX 추론 중복 실행 방지 플래그
+        let mediapipeFrameCounter = 0; // MediaPipe 호출 빈도 제어용
+
+        // Exponential Moving Average Landmark Smoothing Filter (Zero-latency stabilizer)
+        let smoothedLandmarks = null;
+        const SMOOTHING_FACTOR = 0.22; // lower is smoother, higher is more responsive (optimized for noise reduction)
+        let lastChosenSide = {}; // Map of key -> 'left' or 'right' side selection cache to prevent side-switching jitter
+
+        function smoothPoseLandmarks(rawLandmarks) {
+            if (!smoothedLandmarks || smoothedLandmarks.length !== rawLandmarks.length) {
+                // Initialize filter cache with raw coordinate clones
+                smoothedLandmarks = rawLandmarks.map(pt => ({
+                    x: pt.x,
+                    y: pt.y,
+                    z: pt.z,
+                    visibility: pt.visibility !== undefined ? pt.visibility : 1
+                }));
+                return smoothedLandmarks;
+            }
+
+            for (let i = 0; i < rawLandmarks.length; i++) {
+                const prev = smoothedLandmarks[i];
+                const curr = rawLandmarks[i];
+
+                // Real-time Exponential Smoothing Formula
+                prev.x = SMOOTHING_FACTOR * curr.x + (1 - SMOOTHING_FACTOR) * prev.x;
+                prev.y = SMOOTHING_FACTOR * curr.y + (1 - SMOOTHING_FACTOR) * prev.y;
+                prev.z = SMOOTHING_FACTOR * curr.z + (1 - SMOOTHING_FACTOR) * prev.z;
+
+                const currVis = curr.visibility !== undefined ? curr.visibility : 1;
+                prev.visibility = SMOOTHING_FACTOR * currVis + (1 - SMOOTHING_FACTOR) * prev.visibility;
+            }
+            return smoothedLandmarks;
+        }
+
+        // Session records
+        let totalReps = 0;
+        let repScores = [];
+        let peakScore = 0;
+        let prevScore = 0;
+
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas-stream');
+        const ctx = canvas.getContext('2d', { alpha: false }); // alpha:false로 합성 비용 제거
+
+        const CAM_GUIDES = {
+            'squat': '카메라 가이드: 몸의 측면이 보이도록 섭니다. 발끝부터 머리까지 전신이 카메라 화면에 잘 잡히게 카메라 거리를 조절해주세요.',
+            'pushup': '카메라 가이드: 몸의 측면이 향하도록 바닥에 엎드립니다. 손끝부터 발목까지 전신 정렬 라인이 직선으로 보이도록 각도를 세팅해주세요.',
+            'pullup': '카메라 가이드: 철봉 바로 뒤(후면)에 서주세요. 어깨와 양 팔꿈치의 움직임이 양 대칭으로 선명하게 포착되도록 배치해주세요.'
+        };
+
+        // Sound Synthesis via Web Audio API
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSynthSound(type) {
+            if (!document.getElementById('voice-enable').checked) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            const now = audioCtx.currentTime;
+
+            if (type === 'tink') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, now);
+                osc.frequency.exponentialRampToValueAtTime(1200, now + 0.1);
+                gain.gain.setValueAtTime(0.12, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                osc.start(now); osc.stop(now + 0.25);
+            }
+            else if (type === 'pop') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.exponentialRampToValueAtTime(554, now + 0.08);
+                gain.gain.setValueAtTime(0.08, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+                osc.start(now); osc.stop(now + 0.15);
+            }
+            else if (type === 'glass') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1046.5, now);
+                osc.frequency.exponentialRampToValueAtTime(1568, now + 0.15);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+                osc.start(now); osc.stop(now + 0.4);
+
+                const osc2 = audioCtx.createOscillator();
+                const gain2 = audioCtx.createGain();
+                osc2.type = 'sine'; osc2.frequency.setValueAtTime(1318.5, now);
+                gain2.gain.setValueAtTime(0.05, now); gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc2.connect(gain2); gain2.connect(audioCtx.destination);
+                osc2.start(now); osc2.stop(now + 0.3);
+            }
+            else if (type === 'funk') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, now);
+                osc.frequency.linearRampToValueAtTime(120, now + 0.18);
+                gain.gain.setValueAtTime(0.07, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+                osc.start(now); osc.stop(now + 0.25);
+            }
+        }
+
+        // Web Speech API (TTS)
+        let isSpeakingPriority = false;
+        let speakTimeoutId = null;
+        let pendingFeedbackText = null;
+        let ttsQueue = [];
+        let ttsIsSpeaking = false;
+        let lastSpokenText = '';
+        let lastSpokenAt = 0;
+        let ttsUnlocked = false;
+        const isiOSDevice = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+
+        // MP3 file-based TTS. Uses the uploaded female voice files instead of browser speech when available.
+        const feedbackAudioFiles = {
+            "무릎을 조금 더 깊게 굽혀주세요": "tts/squat_knee_deeper.mp3",
+            "조금만 더 내려가 주세요": "tts/go_lower.mp3",
+            "상체가 앞으로 쏠렸어요. 등을 조금 더 세워주세요": "tts/squat_trunk_forward.mp3",
+            "상체가 앞으로 쏠렸어요. 등을 좀 더 세워주세요": "tts/squat_trunk_forward.mp3",
+            "상체를 조금 더 세워주세요": "tts/stand_trunk_up.mp3",
+            "팔을 조금 더 굽혀주세요": "tts/pushup_bend_arms.mp3",
+            "엉덩이가 올라갔어요. 몸을 일직선으로 유지해주세요": "tts/pushup_hips_up.mp3",
+            "엉덩이를 살짝 내려주세요": "tts/lower_hips.mp3",
+            "턱이 바에 가까워질 때까지 조금 더 올라가 주세요": "tts/pullup_higher_to_bar.mp3",
+            "조금만 더 올려주세요": "tts/pullup_higher.mp3",
+            "양팔에 힘을 균등하게 써주세요": "tts/pullup_even_arms.mp3",
+            "몸이 많이 흔들려요. 균형을 잡아주세요": "tts/balance_shaking.mp3",
+            "좌우 균형을 유지해주세요": "tts/keep_balance.mp3",
+            "자세가 아주 좋아요": "tts/good.mp3",
+            "좋아요. 그대로 유지해주세요": "tts/good.mp3",
+            "좋은 자세입니다": "tts/good.mp3",
+            "준비 완료. 자세를 잡고 운동을 시작해볼게요.": "tts/ready.mp3"
+        };
+        const feedbackAudioCache = new Map();
+        let currentFeedbackAudio = null;
+        let mp3AudioUnlocked = false;
+
+        function normalizeFeedbackText(text) {
+            return String(text || '').replace(/\s+/g, ' ').trim();
+        }
+
+        function getFeedbackAudioUrl(text) {
+            const clean = normalizeFeedbackText(text);
+            return feedbackAudioFiles[clean] || null;
+        }
+
+        function getFeedbackAudio(url) {
+            if (!feedbackAudioCache.has(url)) {
+                const audio = new Audio(url);
+                audio.preload = 'auto';
+                audio.playsInline = true;
+                feedbackAudioCache.set(url, audio);
+            }
+            return feedbackAudioCache.get(url);
+        }
+
+        function unlockMp3AudioForIOS() {
+            if (mp3AudioUnlocked) return true;
+            try {
+                const audio = getFeedbackAudio('tts/good.mp3');
+                audio.volume = 0.01;
+                const p = audio.play();
+                if (p && typeof p.then === 'function') {
+                    p.then(() => {
+                        audio.pause();
+                        audio.currentTime = 0;
+                        audio.volume = 1.0;
+                        mp3AudioUnlocked = true;
+                    }).catch(() => {});
+                } else {
+                    audio.pause();
+                    audio.currentTime = 0;
+                    audio.volume = 1.0;
+                    mp3AudioUnlocked = true;
+                }
+                return true;
+            } catch(e) {
+                return false;
+            }
+        }
+
+        function playFeedbackAudioFile(text, onDone) {
+            const url = getFeedbackAudioUrl(text);
+            if (!url) return false;
+
+            try {
+                if (currentFeedbackAudio) {
+                    currentFeedbackAudio.pause();
+                    currentFeedbackAudio.currentTime = 0;
+                }
+
+                const audio = getFeedbackAudio(url);
+                currentFeedbackAudio = audio;
+                audio.currentTime = 0;
+                audio.volume = 1.0;
+
+                let finished = false;
+                const finish = () => {
+                    if (finished) return;
+                    finished = true;
+                    if (currentFeedbackAudio === audio) currentFeedbackAudio = null;
+                    audio.onended = null;
+                    audio.onerror = null;
+                    if (typeof onDone === 'function') onDone();
+                };
+
+                const safetyTimeout = setTimeout(finish, 3500);
+                audio.onended = () => { clearTimeout(safetyTimeout); finish(); };
+                audio.onerror = () => { clearTimeout(safetyTimeout); finish(); };
+
+                const playPromise = audio.play();
+                if (playPromise && typeof playPromise.catch === 'function') {
+                    playPromise.catch(err => {
+                        clearTimeout(safetyTimeout);
+                        console.warn('MP3 TTS playback failed:', err);
+                        finish();
+                    });
+                }
+                return true;
+            } catch(e) {
+                console.warn('MP3 TTS error:', e);
+                return false;
+            }
+        }
+
+        // 한국어 여성 음성 우선 선택
+        // 브라우저 TTS는 기기에 설치된 음성을 사용하므로, iPhone/iPad에서는
+        // iOS 설정 > 손쉬운 사용 > 콘텐츠 말하기 > 음성 > 한국어에서 여성 음성을 받아두면 가장 자연스럽게 재생된다.
+        function pickNaturalKoreanFemaleVoice() {
+            const voices = getSafeVoices();
+            const koreanVoices = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith('ko'));
+
+            const femaleNamePattern = /Yuna|유나|Sora|소라|Narae|나래|Yuri|유리|Jiyoung|지영|Seoyeon|서연|female|woman|여성/i;
+            const naturalPattern = /Siri|Enhanced|Premium|Neural|Natural|Google|Apple|Microsoft/i;
+
+            return (
+                koreanVoices.find(v => femaleNamePattern.test(v.name) && naturalPattern.test(v.name)) ||
+                koreanVoices.find(v => femaleNamePattern.test(v.name)) ||
+                koreanVoices.find(v => naturalPattern.test(v.name)) ||
+                koreanVoices.find(v => v.default) ||
+                koreanVoices[0] ||
+                voices.find(v => femaleNamePattern.test(v.name)) ||
+                voices[0]
+            );
+        }
+
+        function unlockTTSForIOS() {
+            if (!isTTSSupported()) return false;
+            try {
+                getSafeVoices();
+                window.speechSynthesis.cancel();
+
+                // iOS/Safari는 반드시 사용자 터치 이벤트 안에서 실제 발화를 한 번 해야 이후 TTS가 열린다.
+                // 빈 문자열은 무시되는 경우가 많아서 아주 작은 볼륨의 마침표로 엔진만 깨운다.
+                const unlock = new SpeechSynthesisUtterance('.');
+                unlock.lang = 'ko-KR';
+                unlock.volume = 0.01;
+                unlock.rate = 0.92;
+                unlock.pitch = 1.18;
+                const voice = pickNaturalKoreanFemaleVoice();
+                if (voice) unlock.voice = voice;
+                unlock.onend = () => { ttsUnlocked = true; };
+                unlock.onerror = () => { ttsUnlocked = true; };
+                window.speechSynthesis.speak(unlock);
+                ttsUnlocked = true;
+                return true;
+            } catch (e) {
+                console.warn('TTS unlock failed:', e);
+                return false;
+            }
+        }
+
+        window.unlockTTSForIOS = unlockTTSForIOS;
+
+        // iOS/Safari에서 음성 큐가 멈추는 현상 방지
+        if ('speechSynthesis' in window) {
+            setInterval(() => {
+                try {
+                    if (isiOSDevice && window.speechSynthesis.paused) {
+                        window.speechSynthesis.resume();
+                    }
+                } catch(e) {}
+            }, 1000);
+        }
+
+        // 화면 어디든 첫 터치/클릭이 오면 음성 엔진을 먼저 깨운다.
+        ['touchend', 'click'].forEach(evt => {
+            document.addEventListener(evt, () => {
+                unlockMp3AudioForIOS();
+                if (!ttsUnlocked) unlockTTSForIOS();
+            }, { once: false, passive: true });
+        });
+
+        // Centralized priority-aware and race-safe TTS scheduler
+        function isTTSSupported() {
+            return (
+                'speechSynthesis' in window &&
+                typeof window.speechSynthesis?.speak === 'function' &&
+                typeof window.speechSynthesis?.cancel === 'function' &&
+                typeof window.SpeechSynthesisUtterance === 'function'
+            );
+        }
+
+        let cachedVoices = [];
+        function getSafeVoices() {
+            try {
+                if (!('speechSynthesis' in window) || typeof window.speechSynthesis?.getVoices !== 'function') {
+                    return [];
+                }
+                const voices = window.speechSynthesis.getVoices() || [];
+                if (voices.length) cachedVoices = voices;
+                return cachedVoices;
+            } catch(e) {
+                return cachedVoices;
+            }
+        }
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                cachedVoices = window.speechSynthesis.getVoices() || [];
+            };
+            setTimeout(() => { cachedVoices = getSafeVoices(); }, 500);
+        }
+
+        function speakTTS(text, isPriority = false) {
+            if (!document.getElementById('voice-enable').checked || !text) return;
+
+            const cleanText = normalizeFeedbackText(text);
+            if (!cleanText) return;
+
+            const hasMp3Audio = !!getFeedbackAudioUrl(cleanText);
+            if (!hasMp3Audio && !isTTSSupported()) {
+                console.warn('이 브라우저에서는 음성 안내 기능을 지원하지 않습니다.');
+                return;
+            }
+
+            if (hasMp3Audio && isiOSDevice && !mp3AudioUnlocked) {
+                unlockMp3AudioForIOS();
+            }
+
+            if (!hasMp3Audio && isiOSDevice && !ttsUnlocked) {
+                unlockTTSForIOS();
+            }
+
+            const now = Date.now();
+            const isGood = cleanText.includes("완벽") || cleanText.includes("좋아") || cleanText.includes("유지");
+            const limit = isGood ? 9000 : speechCooldown;
+
+            // 같은 피드백이 짧은 시간 안에 계속 들어오면 iOS 음성 큐가 막힐 수 있어 중복만 제한한다.
+            if (!isPriority) {
+                if (cleanText === lastSpokenText && now - lastSpokenAt < limit) return;
+                if (now - lastSpeakTime < 1200) return;
+                lastSpeakTime = now;
+            }
+
+            // iOS/Safari는 cancel() 직후 speak()가 씹히는 경우가 많다.
+            // 그래서 음성을 직접 취소하지 않고 큐에 넣어 순서대로 재생한다.
+            if (isPriority) {
+                ttsQueue = [{ text: cleanText, isPriority: true }];
+                if (!isiOSDevice) {
+                    try { window.speechSynthesis.cancel(); } catch(e) {}
+                    ttsIsSpeaking = false;
+                }
+            } else {
+                // 일반 피드백은 최신 1개만 유지해서 밀리지 않게 한다.
+                ttsQueue = ttsQueue.filter(item => item.isPriority);
+                ttsQueue.push({ text: cleanText, isPriority: false });
+            }
+
+            processTTSQueue();
+        }
+
+        function processTTSQueue() {
+            if (ttsIsSpeaking || ttsQueue.length === 0) return;
+
+            const item = ttsQueue.shift();
+            ttsIsSpeaking = true;
+            if (item.isPriority) {
+                isSpeakingPriority = true;
+                pendingFeedbackText = null;
+            }
+
+            let finished = false;
+            const finish = () => {
+                if (finished) return;
+                finished = true;
+                lastSpokenText = item.text;
+                lastSpokenAt = Date.now();
+                ttsIsSpeaking = false;
+                handleSpeechEnd(item.isPriority);
+                setTimeout(processTTSQueue, isiOSDevice ? 180 : 80);
+            };
+
+            // Prefer uploaded MP3 files. Fall back to browser TTS only when no matching file exists.
+            if (playFeedbackAudioFile(item.text, finish)) {
+                return;
+            }
+
+            if (!isTTSSupported()) {
+                finish();
+                return;
+            }
+
+            try {
+                if (isiOSDevice && window.speechSynthesis.paused) {
+                    window.speechSynthesis.resume();
+                }
+            } catch(e) {}
+
+            const utterance = new SpeechSynthesisUtterance(item.text);
+            utterance.lang = 'ko-KR';
+            utterance.rate = item.isPriority ? 0.98 : 0.9;
+            utterance.pitch = 1.18;
+            utterance.volume = 1.0;
+
+            const voice = pickNaturalKoreanFemaleVoice();
+            if (voice) utterance.voice = voice;
+
+            const safetyTimeout = setTimeout(finish, item.isPriority ? 2500 : 3500);
+            utterance.onend = () => { clearTimeout(safetyTimeout); finish(); };
+            utterance.onerror = () => { clearTimeout(safetyTimeout); finish(); };
+
+            try {
+                window.speechSynthesis.speak(utterance);
+            } catch (e) {
+                clearTimeout(safetyTimeout);
+                finish();
+            }
+        }
+
+        // Helper to handle speech completion and trigger pending feedback
+        function handleSpeechEnd(isPriority) {
+            if (isPriority) {
+                isSpeakingPriority = false;
+                if (pendingFeedbackText) {
+                    const textToSpeak = pendingFeedbackText;
+                    pendingFeedbackText = null;
+                    ttsQueue.push({ text: textToSpeak, isPriority: false });
+                }
+            }
+        }
+
+        // Wrapper for posture feedback
+        function speakFeedback(text) {
+            speakTTS(text, false);
+        }
+
+        // --- 100% Client-Side Physics & State Machine ---
+
+        const THRESHOLDS = {
+            "squat": { key: "knee", down: 95, up: 155, inv: false },
+            "pushup": { key: "elbow", down: 85, up: 150, inv: false },
+            "pullup": { key: "left_elbow", key2: "right_elbow", down: 150, up: 65, inv: true }
+        };
+
+        class LocalStateMachine {
+            constructor() {
+                this.state = "ready";
+                this.count = 0;
+                this.repScores = [];
+                this.downScores = [];
+            }
+            reset() {
+                this.state = "ready";
+                this.count = 0;
+                this.repScores = [];
+                this.downScores = [];
+            }
+            update(angles, exercise, qualityScore) {
+                const cfg = THRESHOLDS[exercise];
+                const prevState = this.state;
+                let angle;
+
+                if (cfg.key2) {
+                    const vals = [];
+                    if (angles[cfg.key] !== undefined) vals.push(angles[cfg.key]);
+                    if (angles[cfg.key2] !== undefined) vals.push(angles[cfg.key2]);
+                    angle = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : (cfg.inv ? 0 : 180);
+                } else {
+                    angle = angles[cfg.key] !== undefined ? angles[cfg.key] : (cfg.inv ? 0 : 180);
+                }
+
+                let countIncreased = false;
+                const inverted = !!cfg.inv;
+
+                if (!inverted) {
+                    if (this.state === "ready" && angle < cfg.down) {
+                        this.state = "down";
+                        this.downScores = [];
+                    } else if (this.state === "down") {
+                        this.downScores.push(qualityScore);
+                        if (angle > cfg.up) {
+                            this.state = "ready";
+                            this.count += 1;
+                            this.repScores.push(this.downScores.length ? Math.max(...this.downScores) : qualityScore);
+                            this.downScores = [];
+                            countIncreased = true;
+                        }
+                    }
+                } else {
+                    if (this.state === "ready" && angle > cfg.down) {
+                        this.state = "down";
+                        this.downScores = [];
+                    } else if (this.state === "down") {
+                        this.downScores.push(qualityScore);
+                        if (angle < cfg.up) {
+                            this.state = "ready";
+                            this.count += 1;
+                            this.repScores.push(this.downScores.length ? Math.max(...this.downScores) : qualityScore);
+                            this.downScores = [];
+                            countIncreased = true;
+                        }
+                    }
+                }
+
+                return {
+                    state: this.state,
+                    changed: prevState !== this.state,
+                    state_changed: prevState !== this.state,
+                    measuring: this.state === "down",
+                    countIncreased: countIncreased,
+                    repDisallowed: false,
+                    count: this.count
+                };
+            }
+        }
+
+        const stateMachineInstance = new LocalStateMachine();
+
+        // Feature processing matching Pose_detect.py normalization
+        function getFeatureVector(lm) {
+            const cx = (lm[23].x + lm[24].x) / 2.0;
+            const cy = (lm[23].y + lm[24].y) / 2.0;
+            const cz = (lm[23].z + lm[24].z) / 2.0;
+
+            const sx = (lm[11].x + lm[12].x) / 2.0;
+            const sy = (lm[11].y + lm[12].y) / 2.0;
+            const sz = (lm[11].z + lm[12].z) / 2.0;
+
+            const dist = Math.sqrt((cx - sx) ** 2 + (cy - sy) ** 2 + (cz - sz) ** 2);
+            const scale = dist > 0.01 ? dist : 1.0;
+
+            const coords = [];
+            for (const point of lm) {
+                const nx = (point.x - cx) / scale;
+                const ny = (point.y - cy) / scale;
+                const nz = (point.z - cz) / scale;
+                coords.push(nx, ny, nz, Number(point.visibility ?? 0));
+            }
+            return new Float32Array(coords);
+        }
+
+        function calculateAngle(a, b, c) {
+            const ba = [a.x - b.x, a.y - b.y];
+            const bc = [c.x - b.x, c.y - b.y];
+            const dot = ba[0] * bc[0] + ba[1] * bc[1];
+            const normBa = Math.sqrt(ba[0] ** 2 + ba[1] ** 2);
+            const normBc = Math.sqrt(bc[0] ** 2 + bc[1] ** 2);
+            const cos = dot / (normBa * normBc + 1e-6);
+            const angle = Math.acos(Math.max(-1.0, Math.min(1.0, cos)));
+            return angle * (180 / Math.PI);
+        }
+
+        function bestAngle(lm, leftPts, rightPts) {
+            const lv = Math.min(...leftPts.map(idx => lm[idx].visibility));
+            const rv = Math.min(...rightPts.map(idx => lm[idx].visibility));
+            if (lv < 0.65 && rv < 0.65) return null;
+
+            const key = leftPts.join(',');
+            let chosenSide = lastChosenSide[key];
+
+            if (!chosenSide) {
+                chosenSide = lv >= rv ? 'left' : 'right';
+            } else {
+                // Hysteresis threshold of 0.15 prevents rapid frame-by-frame toggling 
+                // when visibility for left/right is almost identical
+                if (chosenSide === 'left' && rv > lv + 0.15) {
+                    chosenSide = 'right';
+                } else if (chosenSide === 'right' && lv > rv + 0.15) {
+                    chosenSide = 'left';
+                }
+            }
+            lastChosenSide[key] = chosenSide;
+
+            let a, b, c;
+            if (chosenSide === 'left') {
+                [a, b, c] = leftPts.map(idx => lm[idx]);
+            } else {
+                [a, b, c] = rightPts.map(idx => lm[idx]);
+            }
+            return calculateAngle(a, b, c);
+        }
+
+        function getAngles(lm, exercise) {
+            const angles = {};
+            if (exercise === "squat") {
+                const knee = bestAngle(lm, [23, 25, 27], [24, 26, 28]);
+                const trunk = bestAngle(lm, [11, 23, 25], [12, 24, 26]);
+                if (knee !== null) angles["knee"] = knee;
+                if (trunk !== null) angles["trunk"] = trunk;
+            } else if (exercise === "pushup") {
+                const elbow = bestAngle(lm, [11, 13, 15], [12, 14, 16]);
+                const bodyLine = bestAngle(lm, [11, 23, 27], [12, 24, 28]);
+                if (elbow !== null) angles["elbow"] = elbow;
+                if (bodyLine !== null) angles["body_line"] = bodyLine;
+            } else if (exercise === "pullup") {
+                const lv = lm[11].visibility >= 0.65 && lm[13].visibility >= 0.65 && lm[15].visibility >= 0.65;
+                const rv = lm[12].visibility >= 0.65 && lm[14].visibility >= 0.65 && lm[16].visibility >= 0.65;
+                if (lv) angles["left_elbow"] = calculateAngle(lm[11], lm[13], lm[15]);
+                if (rv) angles["right_elbow"] = calculateAngle(lm[12], lm[14], lm[16]);
+            }
+            return angles;
+        }
+
+        const IDEAL_ANGLES = {
+            "squat": { knee: 90, trunk: 75 },
+            "pushup": { elbow: 90, body_line: 180 },
+            "pullup": { left_elbow: 60, right_elbow: 60 }
+        };
+
+        function calculateScore(angles, exercise, poseLabel, landHist, state) {
+            const ideal = IDEAL_ANGLES[exercise] || {};
+            let accuracy = null;
+
+            if (state === "down" && Object.keys(angles).length > 0) {
+                const angleErrors = [];
+                for (const joint in ideal) {
+                    if (angles[joint] !== undefined) {
+                        const err = Math.abs(angles[joint] - ideal[joint]);
+                        angleErrors.push(Math.min(err, 90));
+                    }
+                }
+                if (angleErrors.length > 0) {
+                    const avgErr = angleErrors.reduce((a, b) => a + b, 0) / angleErrors.length;
+                    accuracy = 100 - (avgErr * (100 / 90));
+                } else {
+                    accuracy = 50;
+                }
+            }
+
+            let stability = 100.0;
+            if (landHist.length >= 10) {
+                const shoulderXs = landHist.slice(-10).map(h => h.left_shoulder_x);
+                const mean = shoulderXs.reduce((a, b) => a + b, 0) / shoulderXs.length;
+                const variance = shoulderXs.reduce((a, b) => a + (b - mean) ** 2, 0) / shoulderXs.length;
+                const std = Math.sqrt(variance);
+                stability = Math.max(0, 100 - std * 1000);
+            }
+
+            const labelPenalty = poseLabel === "Bad" ? 30 : 0;
+            let total = 0;
+            if (accuracy !== null) {
+                total = accuracy * 0.6 + stability * 0.4 - labelPenalty;
+            } else {
+                total = stability - labelPenalty;
+            }
+
+            return {
+                total: Math.round(Math.max(0, Math.min(100, total)) * 10) / 10,
+                accuracy: accuracy !== null ? Math.round(accuracy * 10) / 10 : null,
+                stability: Math.round(stability * 10) / 10,
+                pose_label: poseLabel,
+                measuring: state === "down"
+            };
+        }
+
+        function generateFeedback(angles, exercise, score, state) {
+            // Python Score_manager.generate_feedback과 동일하게 동작:
+            // 감지 안 됨 또는 ready 상태에서는 TTS/피드백을 내보내지 않습니다.
+            if (Object.keys(angles).length === 0) return "";
+            if (state !== "down") return "";
+            const feedbacks = [];
+            const isActivePhase = state === "down";
+
+            if (exercise === "squat") {
+                const knee = angles["knee"] !== undefined ? angles["knee"] : 180;
+                const trunk = angles["trunk"] !== undefined ? angles["trunk"] : 90;
+
+                if (knee > 120) {
+                    feedbacks.push([0, "무릎을 조금 더 깊게 굽혀주세요"]);
+                } else if (knee > 105) {
+                    feedbacks.push([1, "조금만 더 내려가 주세요"]);
+                }
+
+                if (trunk < 50) {
+                    feedbacks.push([0, "상체가 앞으로 쏠렸어요. 등을 조금 더 세워주세요"]);
+                } else if (trunk < 60) {
+                    feedbacks.push([1, "상체를 조금 더 세워주세요"]);
+                }
+            } else if (exercise === "pushup") {
+                const elbow = angles["elbow"] !== undefined ? angles["elbow"] : 180;
+                const bodyLine = angles["body_line"] !== undefined ? angles["body_line"] : 180;
+
+                if (elbow > 120) {
+                    feedbacks.push([0, "팔을 조금 더 굽혀주세요"]);
+                } else if (elbow > 100) {
+                    feedbacks.push([1, "조금만 더 내려가 주세요"]);
+                }
+
+                if (bodyLine < 150) {
+                    feedbacks.push([0, "엉덩이가 올라갔어요. 몸을 일직선으로 유지해주세요"]);
+                } else if (bodyLine < 160) {
+                    feedbacks.push([1, "엉덩이를 살짝 내려주세요"]);
+                }
+            } else if (exercise === "pullup") {
+                const le = angles["left_elbow"] !== undefined ? angles["left_elbow"] : 180;
+                const re = angles["right_elbow"] !== undefined ? angles["right_elbow"] : 180;
+
+                const activeElbows = [];
+                if (le < 170) activeElbows.push(le);
+                if (re < 170) activeElbows.push(re);
+                const avgElbow = activeElbows.length > 0 ? (activeElbows.reduce((a, b) => a + b, 0) / activeElbows.length) : 180;
+
+                if (avgElbow > 100) {
+                    feedbacks.push([0, "턱이 바에 가까워질 때까지 조금 더 올라가 주세요"]);
+                } else if (avgElbow > 80) {
+                    feedbacks.push([1, "조금만 더 올려주세요"]);
+                }
+
+                if (Math.abs(le - re) > 20) {
+                    feedbacks.push([1, "양팔에 힘을 균등하게 써주세요"]);
+                }
+            }
+
+            if (score.stability < 50) {
+                feedbacks.push([0, "몸이 많이 흔들려요. 균형을 잡아주세요"]);
+            } else if (score.stability < 70) {
+                feedbacks.push([2, "좌우 균형을 유지해주세요"]);
+            }
+
+            if (feedbacks.length === 0) {
+                const acc = score.accuracy || 0;
+                if (isActivePhase && acc >= 90) return "자세가 아주 좋아요";
+                if (isActivePhase && acc >= 75) return "좋아요. 그대로 유지해주세요";
+                return "";
+            }
+
+            feedbacks.sort((a, b) => a[0] - b[0]);
+            return feedbacks[0][1];
+        }
+
+        // --- Engine Initialization (MediaPipe WASM and ONNX Web) ---
+
+        // Set paths for ONNX Runtime Web WASM binaries to load from standard CDN
+        ort.env.wasm.wasmPaths = 'static/';
+        ort.env.wasm.numThreads = 1;
+        ort.env.wasm.proxy = false;
+        ort.env.wasm.simd = false; // SIMD를 비활성화하여 Safari 등 특정 브라우저 엔진에서 발생하는 WASM 메모리 정렬 및 컴파일 오류를 원천 차단합니다.
+        ort.env.logLevel = 'warning'; // 불필요한 info 로그 억제
+
+        // Emscripten이 throw한 정수 포인터에서 실제 에러 문자열을 추출하는 헬퍼
+        function extractWasmErrorMessage(err) {
+            if (err == null) return '알 수 없는 에러';
+            // 정상적인 Error 객체
+            if (err instanceof Error) return err.message || err.toString();
+            // Emscripten이 throw한 정수 포인터 (예: 8781368)
+            if (typeof err === 'number') {
+                return `WASM 내부 오류 (code: ${err}) — 메모리 정렬 또는 초기화 실패. 페이지를 새로고침 해주세요.`;
+            }
+            // 기타 문자열이나 객체
+            if (typeof err === 'string') return err;
+            return err.message || err.toString() || JSON.stringify(err);
+        }
+
+        // 정렬된 ArrayBuffer 복사본을 생성하는 헬퍼 (8-byte alignment 보장)
+        function createAlignedBuffer(sourceArrayBuffer) {
+            const byteLength = sourceArrayBuffer.byteLength;
+            // 새 ArrayBuffer는 스펙상 항상 정렬되지만, 추가 안전장치로 패딩
+            const aligned = new ArrayBuffer(byteLength);
+            new Uint8Array(aligned).set(new Uint8Array(sourceArrayBuffer));
+            return aligned;
+        }
+
+        const preloadedAssets = {}; // stores in-memory ArrayBuffers of preloaded models
+
+        async function startPreloadingAssets() {
+            const preloadFiles = [
+                { key: "pose_landmarker", url: "pose_landmarker_full.task", name: "포즈 추적 모델 (9.4 MB)", size: 9398198 },
+                { key: "squat", url: "models/squat.onnx", name: "스쿼트 AI 모델 (314 KB)", size: 313915 },
+                { key: "pushup", url: "models/pushup.onnx", name: "푸시업 AI 모델 (314 KB)", size: 313915 },
+                { key: "pullup", url: "models/pullup.onnx", name: "풀업 AI 모델 (314 KB)", size: 313915 }
+            ];
+
+            const totalBytes = preloadFiles.reduce((acc, f) => acc + f.size, 0);
+            const loadedBytesMap = {};
+
+            preloadFiles.forEach(f => { loadedBytesMap[f.url] = 0; });
+
+            const statusText = document.getElementById("loader-status-text");
+            const progressBar = document.getElementById("loader-progress-bar");
+            const percentageText = document.getElementById("loader-percentage-text");
+
+            try {
+                for (const file of preloadFiles) {
+                    statusText.innerText = `${file.name} 다운로드 중...`;
+
+                    const response = await fetch(file.url);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+                    const contentLength = response.headers.get('content-length');
+                    const fileTotal = contentLength ? parseInt(contentLength, 10) : file.size;
+
+                    const reader = response.body.getReader();
+                    const chunks = [];
+                    let fileLoaded = 0;
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        chunks.push(value);
+                        fileLoaded += value.length;
+                        loadedBytesMap[file.url] = fileLoaded;
+
+                        const totalLoaded = Object.values(loadedBytesMap).reduce((a, b) => a + b, 0);
+                        const percent = Math.min(99, Math.round((totalLoaded / totalBytes) * 100));
+
+                        progressBar.style.width = `${percent}%`;
+                        percentageText.innerText = `${percent}%`;
+                    }
+
+                    const allChunks = new Uint8Array(fileLoaded);
+                    let position = 0;
+                    for (const chunk of chunks) {
+                        allChunks.set(chunk, position);
+                        position += chunk.length;
+                    }
+
+                    preloadedAssets[file.key] = allChunks.buffer;
+                }
+
+                progressBar.style.width = "100%";
+                percentageText.innerText = "100%";
+                statusText.innerText = "AI PT 엔진 컴파일 및 초기화 중...";
+
+                await initEngine();
+
+                // 로딩 완료 → 시작 버튼 표시 (클릭으로 TTS 활성화 후 오버레이 해제)
+                statusText.innerText = "준비 완료! 아래 버튼을 눌러 운동을 시작하세요.";
+                document.getElementById("start-btn").style.display = "block";
+
+            } catch (err) {
+                console.error("Asset preloading failed:", err);
+                statusText.innerText = "다운로드 실패! 인터넷을 확인하고 새로고침 해주세요.";
+                percentageText.innerText = "ERR";
+                progressBar.style.background = "#f43f5e";
+                alert(`AI 모델 다운로드 실패: ${err.message}\n네트워크 연결을 확인하신 후 페이지를 새로고침 해주세요.`);
+            }
+        }
+
+        async function initEngine() {
+            updateConnectionStatus('loading', 'MediaPipe 모델 로드 중...');
+
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "static/wasm"
+                );
+
+                // preloaded pose_landmarker buffer를 Uint8Array로 감싸서 바로 로드
+                poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetBuffer: new Uint8Array(preloadedAssets["pose_landmarker"]),
+                        delegate: "CPU" // GPU보다 안정적이며 Mac/Safari 환경에서 탐지 안됨 현상을 해결하기 위해 CPU WASM 멀티스레드 사용
+                    },
+                    runningMode: "VIDEO",
+                    numPoses: 1,
+                    minPoseDetectionConfidence: 0.65,
+                    minPosePresenceConfidence: 0.65,
+                    minTrackingConfidence: 0.65
+                });
+
+                console.log("MediaPipe initialized successfully from preloaded buffer.");
+
+                await loadONNXModel(activeExercise);
+
+            } catch (err) {
+                console.error("Initialization failed:", err);
+                const errMsg = extractWasmErrorMessage(err);
+                updateConnectionStatus('disconnected', `로딩 실패: ${errMsg}`);
+                alert(`모델 로드에 실패했습니다. 상세 정보: ${errMsg}`);
+            }
+        }
+
+        async function loadONNXModel(exercise) {
+            updateConnectionStatus('loading', `${exercise.toUpperCase()} AI 모델 불러오는 중...`);
+            try {
+                if (onnxSession) {
+                    try { onnxSession.release(); } catch (e) { /* ignore */ }
+                    onnxSession = null;
+                }
+                featureBuffer = [];
+                isOnnxRunning = false;
+
+                const sessionOptions = {
+                    executionProviders: ['wasm'],
+                    graphOptimizationLevel: 'all',
+                    enableCpuMemArena: false
+                };
+
+                // 1차: URL 경로 기반 로딩
+                try {
+                    onnxSession = await ort.InferenceSession.create(`models/${exercise}.onnx`, sessionOptions);
+                    console.log(`${exercise} ONNX model loaded via URL path.`);
+                } catch (urlErr) {
+                    // 2차 fallback: 프리로드된 버퍼 사용
+                    console.warn(`URL 로딩 실패, 프리로드 버퍼로 재시도:`, urlErr);
+                    const alignedBuf = createAlignedBuffer(preloadedAssets[exercise]);
+                    onnxSession = await ort.InferenceSession.create(new Uint8Array(alignedBuf), sessionOptions);
+                    console.log(`${exercise} ONNX model loaded from preloaded buffer (fallback).`);
+                }
+
+                // 진단: 모델 I/O 정보 출력
+                console.log(`[ONNX 진단] inputNames: ${onnxSession.inputNames}, outputNames: ${onnxSession.outputNames}`);
+
+                // 진단: 더미 데이터로 테스트 추론 실행
+                try {
+                    const testInput = new Float32Array(1 * 30 * 132);
+                    const testTensor = new ort.Tensor('float32', testInput, [1, 30, 132]);
+                    const testFeeds = { [onnxSession.inputNames[0]]: testTensor };
+                    const testOut = await onnxSession.run(testFeeds);
+                    const testData = testOut[onnxSession.outputNames[0]].data;
+                    console.log(`[ONNX 진단] 테스트 추론 성공: output=[${testData[0].toFixed(4)}, ${testData[1].toFixed(4)}], shape=${testOut[onnxSession.outputNames[0]].dims}`);
+                } catch (testErr) {
+                    console.error(`[ONNX 진단] 테스트 추론 실패:`, testErr);
+                    const testErrMsg = extractWasmErrorMessage(testErr);
+                    updateConnectionStatus('disconnected', `AI 추론 테스트 실패: ${testErrMsg}`);
+                    onnxSession = null;
+                    return;
+                }
+
+                updateConnectionStatus('connected', 'AI PT 엔진 구동 완료');
+            } catch (err) {
+                console.error("ONNX Load Error:", err);
+                const errMsg = extractWasmErrorMessage(err);
+                updateConnectionStatus('disconnected', `AI 로딩 실패: ${errMsg}`);
+            }
+        }
+
+
+        function updateConnectionStatus(status, text) {
+            const dot = document.getElementById('conn-dot');
+            const label = document.getElementById('conn-text');
+            dot.className = 'status-dot';
+
+            if (status === 'connected') {
+                dot.classList.add('connected');
+            } else if (status === 'loading') {
+                dot.classList.add('loading');
+            }
+            label.innerText = text;
+        }
+
+        async function initCamera() {
+            try {
+                // 모바일 기기의 경우 해상도를 더 낮춰 GPU/CPU 부하 감소
+                const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: isMobile ? 480 : 640 },
+                        height: { ideal: isMobile ? 270 : 360 },
+                        frameRate: { ideal: 30 }
+                    },
+                    audio: false
+                });
+                video.srcObject = stream;
+                video.addEventListener('loadedmetadata', () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+
+                    // 브라우저 자동재생 차단 방지를 위해 명시적으로 play() 호출 및 프로미스 처리
+                    video.play().then(() => {
+                        console.log("Webcam video playing successfully.");
+                        isCameraActive = true;
+                        requestAnimationFrame(processFrameLoop);
+                    }).catch(playErr => {
+                        console.warn("Webcam play auto-start blocked by browser. Retrying...", playErr);
+                        isCameraActive = true;
+                        requestAnimationFrame(processFrameLoop);
+                    });
+                });
+                updateCameraGuide();
+            } catch (err) {
+                console.error("Webcam init failed:", err);
+                alert("카메라 권한을 얻을 수 없습니다. 브라우저 주소창 왼쪽의 카메라 차단 아이콘을 눌러 승인해주세요.");
+            }
+        }
+
+        // --- Core Render Loop ---
+        // MediaPipe는 매 프레임 실행 (타임스탬프 단조증가 필수)
+        // ONNX 추론만 비동기 분리하여 렌더 블로킹 방지
+        let lastFrameTime = Date.now();
+        let fpsSamples = [];
+        let lastMpTimestamp = 0; // MediaPipe 타임스탬프 단조증가 보장용
+
+        // Java Spring Boot ONNX 서버 모드
+        let javaBackendSocket = null;
+        let javaBackendExercise = null;
+        let javaBackendBusy = false;
+        let javaPrevCount = 0;
+
+        function getJavaBackendWsUrl(exercise) {
+            const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+            return `${protocol}//${location.host}/ws/${exercise}`;
+        }
+
+        function ensureJavaBackendSocket() {
+            if (javaBackendSocket && javaBackendSocket.readyState === WebSocket.OPEN && javaBackendExercise === activeExercise) {
+                return true;
+            }
+
+            if (javaBackendSocket) {
+                try { javaBackendSocket.close(); } catch (_) {}
+            }
+
+            javaBackendExercise = activeExercise;
+            javaBackendSocket = new WebSocket(getJavaBackendWsUrl(activeExercise));
+
+            javaBackendSocket.onopen = () => {
+                updateConnectionStatus('connected', `Java ${activeExercise.toUpperCase()} AI 연결됨`);
+            };
+
+            javaBackendSocket.onmessage = (event) => {
+                javaBackendBusy = false;
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.error) {
+                        if (data.error === "no_pose" || data.error === "no_landmarks") updateHUDNoPose();
+                        return;
+                    }
+                    applyJavaBackendResult(data);
+                } catch (err) {
+                    console.warn("Java AI 결과 처리 실패:", err);
+                }
+            };
+
+            javaBackendSocket.onerror = (err) => {
+                javaBackendBusy = false;
+                console.error("Java WebSocket 오류:", err);
+                updateConnectionStatus('disconnected', 'Java AI 연결 실패');
+            };
+
+            javaBackendSocket.onclose = () => {
+                javaBackendBusy = false;
+                updateConnectionStatus('disconnected', 'Java AI 연결 종료');
+            };
+
+            return false;
+        }
+
+        function applyJavaBackendResult(data) {
+            const poseLabel = data.pose_label || "Good";
+            const stateData = data.state || { state: "ready", count: 0, measuring: false };
+            const scoreData = data.score || { total: 0, accuracy: null, stability: 100, measuring: stateData.measuring };
+            const feedbackText = data.feedback || "";
+            const landmarks = (data.landmarks || []).map(p => ({ x: p[0], y: p[1], visibility: 1 }));
+
+            stateData.countIncreased = Number(stateData.count || 0) > javaPrevCount;
+            stateData.repDisallowed = false;
+            javaPrevCount = Number(stateData.count || 0);
+
+            if (landmarks.length >= 33) {
+                drawSkeletonOverlay(landmarks, poseLabel);
+            }
+
+            updateHUD(stateData, scoreData, feedbackText, poseLabel);
+        }
+
+        function processFrameLoop() {
+            if (!isCameraActive || !video.videoWidth) {
+                requestAnimationFrame(processFrameLoop);
+                return;
+            }
+
+            const now = Date.now();
+            const fps = 1000 / (now - lastFrameTime);
+            lastFrameTime = now;
+            fpsSamples.push(fps);
+            if (fpsSamples.length > 30) fpsSamples.shift();
+            const avgFps = fpsSamples.reduce((a, b) => a + b, 0) / fpsSamples.length;
+            document.getElementById('guide-badge').innerText = `FPS ${avgFps.toFixed(0)}`;
+
+            // Draw Webcam mirrored frame
+            ctx.save();
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            // MediaPipe 포즈 감지 — 매 프레임 실행 (고해상도 Monotonic 타임스탬프 사용)
+            if (poseLandmarker) {
+                // performance.now()는 절대로 뒤로 가지 않는 고해상도 Monotonic 타이머입니다.
+                // MediaPipe 내부적으로 ms -> us (마이크로초) 변환 시 올림/내림 오차로 인해
+                // 소수점 이하 값 충돌이 생기지 않도록 정수형 ms 기준 최소 1ms 증가를 완벽 보장합니다.
+                const currentMs = Math.round(performance.now());
+                const mpTimestamp = Math.max(currentMs, lastMpTimestamp + 1);
+                lastMpTimestamp = mpTimestamp;
+
+                try {
+                    const results = poseLandmarker.detectForVideo(video, mpTimestamp);
+                    const rawLandmarks = results && results.landmarks && results.landmarks.length ? results.landmarks[0] : null;
+
+                    if (rawLandmarks) {
+                        const socketReady = ensureJavaBackendSocket();
+
+                        // 프론트엔드는 판단하지 않습니다.
+                        // raw landmark만 Java 서버로 보내고, Good/Bad/카운트/점수/피드백은 서버 결과를 그대로 표시합니다.
+                        if (socketReady && !javaBackendBusy) {
+                            javaBackendBusy = true;
+                            javaBackendSocket.send(JSON.stringify({
+                                landmarks: rawLandmarks.map(p => ({
+                                    x: p.x,
+                                    y: p.y,
+                                    z: p.z || 0,
+                                    visibility: (p.visibility !== undefined ? p.visibility : (p.visibilityScore !== undefined ? p.visibilityScore : 1))
+                                }))
+                            }));
+                        }
+                    } else {
+                        smoothedLandmarks = null;
+                        updateHUDNoPose();
+                    }
+                } catch (mpErr) {
+                    console.warn("MediaPipe detection error:", mpErr);
+                }
+            }
+
+            requestAnimationFrame(processFrameLoop);
+        }
+
+        // ONNX 추론을 렌더 루프와 분리하여 비동기로 실행
+        async function runOnnxInference() {
+            if (isOnnxRunning || !onnxSession) return;
+            isOnnxRunning = true;
+            try {
+                const flattened = new Float32Array(30 * 132);
+                const bufferSnapshot = featureBuffer.slice();
+                for (let i = 0; i < 30; i++) {
+                    flattened.set(bufferSnapshot[i], i * 132);
+                }
+
+                const tensor = new ort.Tensor('float32', flattened, [1, 30, 132]);
+                const feeds = { [onnxSession.inputNames[0]]: tensor };
+                const outputs = await onnxSession.run(feeds);
+                const outputData = outputs[onnxSession.outputNames[0]].data;
+
+                const predictedClass = outputData[0] >= outputData[1] ? 0 : 1;
+                cachedPoseLabel = predictedClass === 0 ? "Good" : "Bad";
+            } catch (err) {
+                console.warn("ONNX inference fail:", extractWasmErrorMessage(err));
+            } finally {
+                isOnnxRunning = false;
+            }
+        }
+
+        // Gorgeous custom skeleton drawer matching the Local Test model's exact joints & visibility thresholds
+        function drawSkeletonOverlay(landmarks, label) {
+            const isBad = label === 'Bad';
+            const boneColor = 'rgba(255, 255, 255, 0.28)';
+            const jointColor = isBad ? '#f43f5e' : '#06b6d4';
+            const shadowColor = isBad ? 'rgba(244, 63, 94, 0.85)' : 'rgba(6, 182, 212, 0.85)';
+
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = shadowColor;
+
+            const connections = [
+                [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+                [11, 23], [12, 24], [23, 24],
+                [23, 25], [25, 27], [24, 26], [26, 28]
+            ];
+
+            // 원래 Local Test모델의 15개 핵심 랜드마크 정의 (nose=0, left_ear=7, right_ear=8 포함)
+            const activeLandmarkIndices = [0, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+
+            // Draw bones (only draw lines between joints if BOTH have visibility >= 0.3)
+            ctx.beginPath();
+            ctx.strokeStyle = boneColor;
+            ctx.lineWidth = 3.5;
+
+            connections.forEach(([i, j]) => {
+                const pt1 = landmarks[i];
+                const pt2 = landmarks[j];
+
+                if (pt1 && pt2 && (pt1.visibility === undefined || pt1.visibility >= 0.3) && (pt2.visibility === undefined || pt2.visibility >= 0.3)) {
+                    // Mirror mapping
+                    const x1 = (1 - pt1.x) * canvas.width;
+                    const y1 = pt1.y * canvas.height;
+                    const x2 = (1 - pt2.x) * canvas.width;
+                    const y2 = pt2.y * canvas.height;
+
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                }
+            });
+            ctx.stroke();
+
+            // Draw joints (only draw circles if visibility >= 0.3)
+            activeLandmarkIndices.forEach(idx => {
+                const pt = landmarks[idx];
+                if (!pt || (pt.visibility !== undefined && pt.visibility < 0.3)) return;
+
+                const x = (1 - pt.x) * canvas.width;
+                const y = pt.y * canvas.height;
+
+                ctx.beginPath();
+                // 11, 12, 23, 24 (어깨, 골반)은 크기 7, 나머지는 5.5
+                ctx.arc(x, y, idx === 11 || idx === 12 || idx === 23 || idx === 24 ? 7 : 5.5, 0, 2 * Math.PI);
+                ctx.fillStyle = jointColor;
+                ctx.fill();
+            });
+
+            ctx.shadowBlur = 0;
+        }
+
+        // Live dashboard updater
+        function updateHUD(stateData, scoreData, feedback, poseLabel) {
+            // 1. State pill
+            const stateBadge = document.getElementById('state-badge');
+            stateBadge.innerText = stateData.state.toUpperCase();
+            if (stateData.state === 'down') {
+                stateBadge.className = 'overlay-state-badge state-down';
+            } else {
+                stateBadge.className = 'overlay-state-badge state-ready';
+            }
+
+            // 2. AI predict badge
+            const aiDot = document.getElementById('ai-prediction-dot');
+            const aiBadge = document.getElementById('ai-badge');
+            aiDot.innerText = `AI: ${poseLabel}`;
+            aiBadge.innerText = poseLabel;
+
+            if (poseLabel === 'Good') {
+                aiDot.style.background = 'rgba(16, 185, 129, 0.85)';
+                aiDot.style.borderColor = 'var(--accent-emerald)';
+                aiBadge.className = 'ai-badge badge-good';
+            } else {
+                aiDot.style.background = 'rgba(244, 63, 94, 0.85)';
+                aiDot.style.borderColor = 'var(--accent-rose)';
+                aiBadge.className = 'ai-badge badge-bad';
+            }
+
+            // 3. Metric stats
+            updateScoreGauge(scoreData.total);
+            updateProgressBar('accuracy', scoreData.accuracy);
+            updateProgressBar('stability', scoreData.stability);
+
+            const measuringIndicator = document.getElementById('measuring-indicator');
+            measuringIndicator.style.display = scoreData.measuring ? 'inline' : 'none';
+
+            // 4. Score rise sound effects (Pop & Glass)
+            if (stateData.state === 'down') {
+                const diff = scoreData.total - prevScore;
+                if (diff >= 5.0) {
+                    if (scoreData.total >= 85) {
+                        playSynthSound('glass');
+                    } else {
+                        playSynthSound('pop');
+                    }
+                    prevScore = scoreData.total;
+                }
+            } else {
+                prevScore = 0;
+            }
+
+            // 5. Count increased trigger or disallowed trigger
+            if (stateData.countIncreased) {
+                playSynthSound('tink');
+
+                speakTTS(stateData.count.toString(), true);
+
+                totalReps = stateData.count;
+                document.getElementById('sum-reps').innerText = totalReps;
+
+                repScores.push(scoreData.total);
+                const avgScore = repScores.reduce((a, b) => a + b, 0) / repScores.length;
+                document.getElementById('sum-avg').innerText = avgScore.toFixed(1);
+
+                if (scoreData.total > peakScore) {
+                    peakScore = scoreData.total;
+                    document.getElementById('sum-peak').innerText = peakScore.toFixed(1);
+                }
+            } else if (stateData.repDisallowed) {
+                playSynthSound('funk'); // Warning beep only. No TTS for wrong-posture disallowed reps.
+
+                const feedbackBubble = document.getElementById('feedback-bubble');
+                feedbackBubble.innerText = "자세가 올바르지 않아 개수가 인정되지 않았습니다.";
+                feedbackBubble.className = "feedback-bubble highlight";
+                setTimeout(() => {
+                    feedbackBubble.classList.remove('highlight');
+                }, 400);
+            }
+
+            // 6. Natural Language Feedback TTS
+            const feedbackBubble = document.getElementById('feedback-bubble');
+            if (feedback && feedback !== feedbackBubble.innerText) {
+                feedbackBubble.innerText = feedback;
+                feedbackBubble.className = "feedback-bubble highlight";
+
+                const isPraise = feedback.includes("완벽") || feedback.includes("좋아") || feedback.includes("유지");
+                if (!isPraise && stateData.state === 'down') {
+                    playSynthSound('funk'); // warning beep
+                }
+
+                speakFeedback(feedback);
+                setTimeout(() => {
+                    feedbackBubble.classList.remove('highlight');
+                }, 400);
+            } else if (!feedback) {
+                if (stateData.state === 'down') {
+                    feedbackBubble.innerText = "자세를 측정하고 있습니다...";
+                } else {
+                    feedbackBubble.innerText = "준비 자세를 잡고 운동을 시작해보세요.";
+                }
+            }
+        }
+
+        function updateHUDNoPose() {
+            document.getElementById('ai-prediction-dot').innerText = "AI: --";
+            document.getElementById('feedback-bubble').innerText = "카메라 앵글에 전신을 비춰주세요.";
+            document.getElementById('state-badge').className = 'overlay-state-badge state-ready';
+            document.getElementById('state-badge').innerText = 'READY';
+        }
+
+        // Switch exercise dynamically
+        window.changeExercise = async function (exercise) {
+            if (activeExercise === exercise) return;
+            activeExercise = exercise;
+
+            // Update selectors active state UI
+            document.querySelectorAll('.selector-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(`btn-${exercise}`).classList.add('active');
+
+            // Reset state machine
+            stateMachineInstance.reset();
+            landmarkHistory = [];
+            featureBuffer = [];
+            prevScore = 0;
+            cachedPoseLabel = "Good";
+            lastSpokenText = '';
+            lastSpokenAt = 0;
+            ttsQueue = [];
+            ttsIsSpeaking = false;
+            onnxFrameCounter = 0;
+            isOnnxRunning = false;
+            smoothedLandmarks = null;
+            lastChosenSide = {};
+
+            updateCameraGuide();
+            // Java 서버 WebSocket을 새 운동으로 다시 연결
+            if (javaBackendSocket) {
+                try { javaBackendSocket.close(); } catch (_) {}
+                javaBackendSocket = null;
+            }
+            javaBackendExercise = null;
+            javaBackendBusy = false;
+            javaPrevCount = 0;
+        };
+
+        window.updateCameraGuide = function () {
+            document.getElementById('camera-guide').innerText = CAM_GUIDES[activeExercise];
+        };
+
+        window.resetStats = function () {
+            stateMachineInstance.reset();
+            landmarkHistory = [];
+            featureBuffer = [];
+            totalReps = 0;
+            repScores = [];
+            peakScore = 0;
+            prevScore = 0;
+            cachedPoseLabel = "Good";
+            lastSpokenText = '';
+            lastSpokenAt = 0;
+            ttsQueue = [];
+            ttsIsSpeaking = false;
+            onnxFrameCounter = 0;
+            isOnnxRunning = false;
+            smoothedLandmarks = null;
+            lastChosenSide = {};
+
+            document.getElementById('sum-reps').innerText = '0';
+            document.getElementById('sum-avg').innerText = '0.0';
+            document.getElementById('sum-peak').innerText = '0.0';
+
+            updateScoreGauge(0);
+            updateProgressBar('accuracy', null);
+            updateProgressBar('stability', 100);
+
+            const fb = document.getElementById('feedback-bubble');
+            fb.innerText = "세션 기록이 리셋되었습니다. 자세를 잡고 스쿼트를 시작해보세요.";
+            fb.className = "feedback-bubble highlight";
+        };
+
+
+        const FITNESS_AUTH_KEYS = ["fitnessUserId", "fitnessUser", "user", "loggedInUserId", "currentUser", "username"];
+
+        function getFitnessUserFromStorage() {
+            for (const key of FITNESS_AUTH_KEYS) {
+                const value = localStorage.getItem(key);
+                if (value) return value;
+            }
+            return "";
+        }
+
+        function setFitnessUserToStorage(id) {
+            if (!id) return;
+            for (const key of FITNESS_AUTH_KEYS) {
+                localStorage.setItem(key, id);
+            }
+        }
+
+        window.logoutFitness = function () {
+            for (const key of FITNESS_AUTH_KEYS) {
+                localStorage.removeItem(key);
+            }
+            location.href = "index.html";
+        };
+
+        function updateExerciseAuthUI() {
+            const id = getFitnessUserFromStorage();
+            if (id) {
+                loggedInUserId = id;
+                setFitnessUserToStorage(id);
+            }
+
+            const name = document.getElementById("fitness-auth-name");
+            const loginBtn = document.getElementById("fitness-login-open");
+            const logoutBtn = document.getElementById("fitness-logout-btn");
+
+            if (name) name.textContent = id ? (id + "님") : "비로그인";
+            if (loginBtn) loginBtn.style.display = id ? "none" : "inline-block";
+            if (logoutBtn) logoutBtn.style.display = id ? "inline-block" : "none";
+        }
+
+        window.addEventListener("DOMContentLoaded", updateExerciseAuthUI);
+
+
+        let loggedInUserId = getFitnessUserFromStorage();
+
+        window.handleAuth = async function(action) {
+            const id = document.getElementById('user-id').value.trim();
+            const pw = document.getElementById('user-pw').value;
+            if(!id || !pw) { alert("아이디와 비밀번호를 입력해주세요."); return; }
+
+            try {
+                // 형식: "userId:password:action"
+                const encodedAuth = btoa(unescape(encodeURIComponent(id + ":" + pw + ":" + action)));
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    body: encodedAuth
+                });
+                
+                const result = await response.json();
+                if(result.status === "success") {
+                    loggedInUserId = id;
+                    setFitnessUserToStorage(id);
+                    updateExerciseAuthUI();
+                    document.getElementById('login-overlay').style.display = 'none';
+                    
+                    if(result.data) {
+                        totalReps = result.data.totalReps || 0;
+                        document.getElementById('sum-reps').innerText = totalReps;
+                        document.getElementById('sum-avg').innerText = (result.data.avgScore || 0).toFixed(1);
+                    }
+                    alert(result.message || `반갑습니다, ${id}님!`);
+                } else {
+                    alert("❌ 오류: " + result.message);
+                }
+            } catch(e) {
+                alert("서버 연결 실패. Java 서버를 확인하세요.");
+            }
+        };
+
+        window.exportSessionData = async function () {
+            loggedInUserId = loggedInUserId || getFitnessUserFromStorage();
+            if(!loggedInUserId) { alert("기록 저장은 로그인 후 가능합니다."); return; }
+            setFitnessUserToStorage(loggedInUserId);
+            
+            const sessionData = {
+                userId: loggedInUserId,
+                exercise: activeExercise,
+                totalReps: totalReps,
+                avgScore: parseFloat(document.getElementById('sum-avg').innerText),
+                peakScore: peakScore,
+                scores: repScores,
+                timestamp: new Date().toISOString()
+            };
+
+            try {
+                const jsonStr = JSON.stringify(sessionData);
+                const encodedData = btoa(unescape(encodeURIComponent(jsonStr)));
+
+                const response = await fetch('/api/workout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: encodedData
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    alert("✅ " + loggedInUserId + "님, 기록이 Java 서버에 저장되었습니다!\n");
+                }
+            } catch (error) {
+                alert("❌ 전송 실패. Java 서버가 켜져 있는지 확인하세요.");
+            }
+        };
+
+        function updateScoreGauge(score) {
+            document.getElementById('score-value').innerText = score.toFixed(1);
+            const circle = document.getElementById('gauge-circle');
+            const offset = 377 - (377 * Math.max(0, Math.min(100, score)) / 100);
+            circle.style.strokeDashoffset = offset;
+        }
+
+        function updateProgressBar(id, value) {
+            const label = document.getElementById(`${id}-val`);
+            const bar = document.getElementById(`${id}-bar`);
+
+            if (value === null) {
+                label.innerText = '-- %';
+                bar.style.width = '0%';
+            } else {
+                label.innerText = `${value.toFixed(0)} %`;
+                bar.style.width = `${Math.max(0, Math.min(100, value))}%`;
+            }
+        }
+
+        // Start initialization (Guaranteed to execute even if DOMContentLoaded already fired)
+        function initApp() {
+            getSafeVoices();
+            startPreloadingAssets();
+        }
+
+        // 시작 버튼 클릭 핸들러 — 사용자 제스처 안에서 TTS 엔진 활성화
+        let readyIntroPlayed = false;
+        window.handleStartButton = async function () {
+            // iPad/iPhone/Safari 대응: 사용자 버튼 클릭 순간에 TTS 엔진을 직접 unlock
+            unlockTTSForIOS();
+
+            const permissionBox = document.getElementById("camera-permission-fix");
+            if (permissionBox) permissionBox.style.display = "none";
+
+            if (!isCameraActive) {
+                await initCamera();
+            }
+
+            // 로딩 오버레이 제거
+            const loader = document.getElementById("loader-overlay");
+            loader.classList.add("fade-out");
+
+            // 인트로 안내 TTS 중복 방지
+            if (!readyIntroPlayed) {
+                readyIntroPlayed = true;
+                speakTTS("준비 완료. 자세를 잡고 운동을 시작해볼게요.", true);
+            }
+        };
+
+        if (document.readyState === 'loading') {
+            window.addEventListener('DOMContentLoaded', initApp);
+        } else {
+            initApp();
+        }
+    </script>
+</body>
+
+</html>

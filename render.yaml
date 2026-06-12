@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: fitness-java-onnx-web
+    env: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /

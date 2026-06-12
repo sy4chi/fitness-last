@@ -1,0 +1,1 @@
+Couldn't find the requested file /wasm/vision_tasks_wasm_bin.js in @mediapipe/tasks-vision.

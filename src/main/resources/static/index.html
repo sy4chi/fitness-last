@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FITNESS | AI 운동 자세 코치</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="browser-shell">
+    <section class="hero-card">
+      <header class="topbar">
+        <a class="logo" href="index.html">
+          <span>FITNESS</span>
+          <small>AI TRAINER</small>
+        </a>
+        <div class="header-actions">
+          <span id="userBadge" class="user-badge">비로그인</span>
+          <a id="loginLink" class="auth-link" href="login.html">로그인</a>
+          <button id="logoutBtn" class="auth-link" onclick="logoutFitness()" style="display:none; cursor:pointer; font-family:inherit;">로그아웃</button>
+        </div>
+      </header>
+
+      <section class="hero-copy">
+        <div class="hero-copy-inner">
+          <h1>집에서 간단하게<br>배우는 정확한<br>운동 자세</h1>
+          <p>시작하기를 누르면 바로 GRU AI Fitness Assistant로 이동합니다.</p>
+          <div class="cta-row">
+            <a class="primary-btn" href="exercise.html">지금 시작하기</a>
+            <a class="secondary-btn" href="ranking.html">정확도 랭킹 보기</a>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <section class="ranking-preview">
+    <h2>랭킹</h2>
+    <div id="rankList" class="rank-list">랭킹을 불러오는 중...</div>
+  </section>
+
+
+<script>
+const FITNESS_KEYS = ["fitnessUserId", "fitnessUser", "user", "loggedInUserId", "currentUser", "username"];
+
+function getFitnessUser() {
+  for (const key of FITNESS_KEYS) {
+    const v = localStorage.getItem(key);
+    if (v) return v;
+  }
+  return "";
+}
+
+function setFitnessUser(id) {
+  if (!id) return;
+  for (const key of FITNESS_KEYS) localStorage.setItem(key, id);
+}
+
+function logoutFitness() {
+  for (const key of FITNESS_KEYS) localStorage.removeItem(key);
+  location.href = "index.html";
+}
+
+function updateAuthUI() {
+  const id = getFitnessUser();
+  const badge = document.getElementById("userBadge");
+  const login = document.getElementById("loginLink");
+  const logout = document.getElementById("logoutBtn");
+
+  if (id) {
+    setFitnessUser(id);
+    if (badge) badge.textContent = id + "님";
+    if (login) login.style.display = "none";
+    if (logout) logout.style.display = "inline-flex";
+  } else {
+    if (badge) badge.textContent = "비로그인";
+    if (login) login.style.display = "inline-flex";
+    if (logout) logout.style.display = "none";
+  }
+}
+
+async function loadRanking() {
+  const box = document.getElementById("rankList");
+  if (!box) return;
+  try {
+    const res = await fetch("/api/ranking");
+    if (!res.ok) throw new Error("ranking api failed");
+    const data = await res.json();
+    const ranking = data.ranking || [];
+    if (!ranking.length) {
+      box.textContent = "아직 저장된 기록이 없습니다.";
+      return;
+    }
+    box.innerHTML = ranking.slice(0, 5).map((r, i) => {
+      const id = r.id || r.userId || "user";
+      const reps = r.totalReps ?? 0;
+      const avg = Number(r.avgScore ?? 0).toFixed(1);
+      return `<div class="rank-row"><b>${i + 1}</b><span>${id}</span><span>${avg}점 / ${reps}회</span></div>`;
+    }).join("");
+  } catch (e) {
+    box.textContent = "랭킹 API 연결 전입니다.";
+  }
+}
+
+updateAuthUI();
+loadRanking();
+</script>
+
+</body>
+</html>

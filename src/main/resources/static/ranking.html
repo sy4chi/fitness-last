@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>정확도 랭킹</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<section class="ranking-preview" style="min-height:100vh">
+  <a href="index.html">← 홈으로</a>
+  <h2>정확도 랭킹</h2>
+  <div id="rankList" class="rank-list">불러오는 중...</div>
+</section>
+
+<script>
+async function loadRanking() {
+  const box = document.getElementById('rankList');
+  try {
+    const res = await fetch('/api/ranking');
+    if (!res.ok) throw new Error('ranking api failed');
+    const data = await res.json();
+    const arr = data.ranking || [];
+    box.innerHTML = arr.length
+      ? arr.map((r, i) => {
+          const id = r.id || r.userId || 'user';
+          const avg = Number(r.avgScore || 0).toFixed(1);
+          const reps = r.totalReps || r.reps || 0;
+          const peak = Number(r.peakScore || 0).toFixed(1);
+          return `<div class="rank-row"><b>${i + 1}</b><span>${id}</span><span>평균 ${avg}점 / 최고 ${peak}점 / ${reps}회</span></div>`;
+        }).join('')
+      : '아직 저장된 기록이 없습니다.';
+  } catch (e) {
+    box.textContent = '랭킹 API 연결 실패: Java 서버에서 /api/ranking을 확인해주세요.';
+  }
+}
+loadRanking();
+</script>
+</body>
+</html>
