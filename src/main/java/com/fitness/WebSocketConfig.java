@@ -1,22 +1,19 @@
 package com.fitness;
 
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.socket.config.annotation.EnableWebSocket;
-import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
-import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
+import org.springframework.web.socket.config.annotation.*;
 
 @Configuration
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
-    private final WorkoutWebSocketHandler workoutWebSocketHandler;
+    private final WorkoutSocketHandler handler;
 
-    public WebSocketConfig(WorkoutWebSocketHandler workoutWebSocketHandler) {
-        this.workoutWebSocketHandler = workoutWebSocketHandler;
+    public WebSocketConfig(WorkoutSocketHandler handler) {
+        this.handler = handler;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(workoutWebSocketHandler, "/ws/{exercise}")
-                .setAllowedOrigins("*");
+        registry.addHandler(handler, "/ws/{exercise}").setAllowedOrigins("*");
     }
 }

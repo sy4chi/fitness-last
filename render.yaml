@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: fitness-java-onnx-web
+    name: fitness-java-backend
     env: docker
     plan: free
     autoDeploy: true

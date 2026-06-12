@@ -129,18 +129,3 @@ a { color: inherit; text-decoration: none; }
   .user-badge { display: none; }
   .hero-copy h1 { font-size: 46px; }
 }
-
-
-/* mobile Korean title wrap fix */
-.hero-copy h1 {
-  word-break: keep-all;
-  overflow-wrap: normal;
-}
-@media (max-width: 800px) {
-  .hero-copy h1 {
-    font-size: 42px;
-    line-height: 1.16;
-    word-break: keep-all;
-    overflow-wrap: normal;
-  }
-}
