@@ -84,3 +84,8 @@ https://fitness-java-onnx-web.onrender.com/exercise.html
 ```
 
 Render 무료 플랜은 CPU가 약하고 sleep이 있어 첫 접속이 느릴 수 있습니다.
+
+
+## Fix
+
+Spring Boot Maven plugin `repackage` is enabled so Render can run `java -jar app.jar`.
